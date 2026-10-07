@@ -277,7 +277,7 @@ def _limit_view():
         pp = t.get("panel_port", "")
         out.append({"id": t.get("id", ""), "name": t.get("name", ""), "path": t.get("path", ""),
                     "user": t.get("user", ""), "pass": t.get("pass", ""), "port": pp,
-                    "addr": ("http://%s:%s/%s/login" % (ip, pp, t.get("path", ""))) if pp else "",
+                    "addr": ("https://%s:%s/%s/login" % (ip, pp, t.get("path", ""))) if pp else "",
                     "exhausted": bool(t.get("exhausted")),
                     "used_h": human_bytes(used), "quota_h": human_bytes(q),
                     "pct": (min(100, int(used * 100 / q)) if q else 0)})
@@ -3231,6 +3231,14 @@ def _user_proxy_entries(rec):
     ADDR = _server_addr()
     entries = []
     name = rec.get("name") or ""
+    # Build the same node display names the panel shows, so that the exported
+    # link / YAML / QR carry the same name as the node list (not the user name).
+    _real = real_node_inbounds(cfg.get("inbounds", []))
+    _dvless = [x for x in disabled_inb if is_real_node(x) and x.get("protocol", "").lower() == "vless"]
+    _vless_ports = sorted([x.get("port") for _, x in _real if x.get("protocol") == "vless"]
+                          + [x.get("port") for x in _dvless])
+    _vless_rank = {p: i + 1 for i, p in enumerate(_vless_ports)}
+    _hy2_idx = {h.get("id"): i + 1 for i, h in enumerate(hy2_nodes_raw)}
 
     for b in rec.get("bindings", []):
         if b.get("proto") == "vless":
@@ -3254,9 +3262,10 @@ def _user_proxy_entries(rec):
                 pub = stream.get("ui_public_key", "") or ""
             short_id = (reality.get("shortIds") or [""])[0] or ""
             uid = rec.get("uuid", "")
+            vname = (ib.get("ui_remark") or "").strip() or ("vless%d" % _vless_rank.get(int(port), 0))
             if sec == "reality":
                 p = {
-                    "name": "%s_vless" % name,
+                    "name": vname,
                     "type": "vless",
                     "server": ADDR,
                     "port": int(port),
@@ -3275,7 +3284,7 @@ def _user_proxy_entries(rec):
                 }
             else:
                 p = {
-                    "name": "%s_vless" % name,
+                    "name": vname,
                     "type": "vless",
                     "server": ADDR,
                     "port": int(port),
@@ -3285,7 +3294,7 @@ def _user_proxy_entries(rec):
                     "tls": True if sec == "tls" else False,
                 }
             entries.append((p, {
-                "name": "vless", "type": "vless", "server": ADDR,
+                "name": vname, "type": "vless", "server": ADDR,
                 "port": int(port), "uuid": uid, "network": network_raw,
                 "security": sec or "", "flow": flow, "sni": server_name,
                 "pub": pub, "sid": short_id,
@@ -3297,8 +3306,9 @@ def _user_proxy_entries(rec):
                 continue
             hname = rec.get("hy2_name") or rec.get("name") or name
             pw = rec.get("password", "") or ""
+            hnode = h.get("name") or ("hy%d" % _hy2_idx.get(h.get("id"), 0))
             p = {
-                "name": "%s_hysteria2" % name,
+                "name": hnode,
                 "type": "hysteria2",
                 "server": ADDR,
                 "port": int(h.get("port")),
@@ -3307,7 +3317,7 @@ def _user_proxy_entries(rec):
                 "skip-cert-verify": True,
             }
             entries.append((p, {
-                "name": "hysteria2", "type": "hysteria2", "server": ADDR,
+                "name": hnode, "type": "hysteria2", "server": ADDR,
                 "port": int(h.get("port")), "user": hname, "pass": pw,
                 "sni": h.get("sni", "") or "",
             }))
