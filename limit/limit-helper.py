@@ -1,3 +1,13 @@
+"""Hive — limit-helper: the narrow root helper for the limit panel.
+
+Runs as root and listens on /run/limit-helper.sock (0660 root:limitpanel). It
+exposes only a small allowlist of privileged operations — start/stop a
+`limit-xray` / `limit-hysteria@*` unit, allow/delete a ufw port, and rebuild the
+iptables port-redirect chains — so the tenant web process never needs root.
+
+This is the first version — see README.md.
+"""
+
 import json, os, re, socket, subprocess, threading
 
 SOCK = "/run/limit-helper.sock"

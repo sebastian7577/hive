@@ -1,3 +1,13 @@
+"""Hive — traffic accounting for the main panel.
+
+Reads live byte counters from Xray's stats API and from each Hysteria2 node's
+traffic-stats endpoint, then folds the deltas into a persistent totals file
+(traffic_totals.json). The heavy queries only run in the background collector;
+web requests just read the persisted totals.
+
+This is the first version — see README.md.
+"""
+
 import json, os, subprocess, fcntl, contextlib, urllib.request
 
 TRAFFIC_PATH = "/usr/local/etc/xray/traffic_totals.json"

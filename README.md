@@ -2,7 +2,7 @@
 
 > **One server, many isolated tenants.** A multi-tenant Xray (VLESS/REALITY) + Hysteria2 panel with a built-in reseller sub-panel, per-tenant traffic quotas, and process-level isolation.
 
-> ⚠️ This is the initial version. It is early and rough: features are incomplete,
+> ⚠️ **This is the first version.** It is early and rough: features are incomplete,
 > docs are thin, and there are certainly bugs we haven't found yet. Treat it as a
 > starting point rather than a finished product. Issues and pull requests are welcome.
 
@@ -24,8 +24,8 @@ General-purpose panels (3x-ui, Marzban) are **single-admin** or **shared-core mu
 - **Limit (multi-tenant) panel**: every tenant gets an **isolated panel** at its own **random port + random path**, manages **its own** VLESS/Hysteria2/forward nodes and clients, with a **total traffic quota**.
 - **Quota enforcement**: when a tenant hits the quota, all of its nodes are disabled automatically.
 - **Master switch**: pause/resume **all** limit services with one toggle.
+- **Node control**: every node (including the ones created at install) can be paused and deleted.
 - **HTTPS panels**: both panels serve TLS with an auto-generated self-signed certificate; the browser shows a one-time warning.
-- **Credentials hashed**: the panel password is stored salted+hashed (PBKDF2) outside the code, and can be changed from the panel.
 - **Isolation first**: separate processes, systemd hardening (exposure score down to **1.9–4.0**), the tenant web process runs as a **non-root** user and performs privileged actions only through a **narrow root helper**.
 
 ## Install
@@ -38,11 +38,25 @@ bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/inst
 
 It installs Xray-core, Hysteria2, the main panel and the multi-tenant (limit) panel, then prints the `https://` URL, the random path and the generated credentials. The certificate is self-signed, so the browser will warn once — that is expected.
 
-Run the same command again to update in place (your nodes, users, tenants, port and path are kept). To remove:
+Update in place (keeps your nodes, users, tenants, port, path and credentials) by running the same command again, or with the shortcut it installs:
+
+```bash
+hive
+```
+
+To remove:
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/install.sh) uninstall
 ```
+
+## Security notes
+
+- **Credentials are random and hashed.** The install generates a random username + password and stores only a salted **PBKDF2** hash in `/opt/xray-viewer/panel_auth.json` (0600) — never in the source. You can change the password from the panel.
+- **Panels are HTTPS** (self-signed cert; `Secure` cookie + HSTS). Traffic is not sent in clear text.
+- **The firewall is never reset.** The installer only *adds* rules: it always keeps the SSH port(s) it can detect (from `sshd_config` and the live session), and opens `443` plus the panel port. An explicit `--reset-firewall` is required to wipe ufw.
+- **Hysteria2 is pinned and verified.** The binary is fetched from the official `apernet/hysteria` release and checked against a hard-coded SHA256.
+- **Tenant isolation**: each tenant runs its own Xray/Hysteria2 instance in a systemd sandbox; the tenant web process is non-root and can only touch its own units/ports through `limit-helper`.
 
 ## Architecture
 

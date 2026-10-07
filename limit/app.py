@@ -1,3 +1,17 @@
+"""Hive — limit (multi-tenant) panel.
+
+One process serves every tenant; the tenant is identified by the request port
+(each tenant has its own random panel port, redirected to this base port by the
+iptables LIMITREDIR chain). It reads/writes the shared tenants.json and, for
+privileged actions (systemctl / ufw / iptables), calls the root `limit-helper`
+over a unix socket instead of running as root itself.
+
+Runtime state lives under /opt/limit/ (data/tenants.json, xray/, hysteria/,
+panel_port, secret_key, tls.crt/tls.key).
+
+This is the first version — see README.md.
+"""
+
 import json, os, sys, re, secrets, hashlib, subprocess, threading, time, datetime, fcntl, contextlib, socket, uuid, urllib.request, urllib.parse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from flask import Flask, request, session, redirect, render_template_string, jsonify, Response
@@ -477,6 +491,10 @@ def _hy2_yaml(port, password, listen, secret, masq):
     return "\n".join(lines) + "\n"
 
 
+# Reconcile every tenant's desired state into reality: rewrite the shared xray
+# config, (re)write each hy2 yaml, start/stop the per-tenant units through the
+# helper, and open the needed ufw ports. Called whenever the tenant signature
+# changes (see _collect_once).
 def apply_all(ts, do_redir=True):
     cfg = json.dumps(build_xray_config(ts), indent=2)
     os.makedirs(os.path.dirname(XRAY_CONFIG), exist_ok=True)
@@ -645,6 +663,8 @@ def _collect_once():
         apply_all(ts)
 
 
+# Background loop: every 5s re-read the live counters, update per-tenant usage
+# and quota, and re-apply the config when the tenant signature changed.
 def _collector():
     while True:
         try:

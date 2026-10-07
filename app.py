@@ -1,3 +1,16 @@
+"""Hive — main (admin) panel.
+
+A single Flask app (served by gunicorn over HTTPS) that manages the main
+Xray (VLESS/REALITY) and Hysteria2 instances, port-forwarding rules, end
+users, the ufw firewall, and the multi-tenant "limit" sub-panel.
+
+Runtime state lives under /usr/local/etc/xray/ (configs, users, hy2 nodes,
+fwd rules, traffic totals) and /opt/xray-viewer/ (url_prefix, server_ip,
+secret_key, panel_auth.json, tls.crt/tls.key).
+
+This is the first version — see README.md.
+"""
+
 import json, os, functools, datetime, subprocess, uuid, shutil, secrets, sys, threading, time, re, hashlib, hmac, socket
 from urllib.parse import quote
 sys.path.insert(0, os.path.dirname(__file__))
@@ -104,6 +117,9 @@ USERNAME = "admin"
 PASSWORD = "admin"
 AUTH_FILE = "/opt/xray-viewer/panel_auth.json"
 
+# Panel credentials are stored salted+hashed in panel_auth.json (0600), never in
+# the source. _auth() re-reads the file on every login so a password change takes
+# effect immediately.
 def _hash_pw(pw, salt=None):
     if salt is None:
         salt = secrets.token_hex(16)
@@ -2640,6 +2656,11 @@ def vless_inbound_from_form(form, uid):
 def inbound_is_protected(port):
     return int(port) in PROTECTED_PORTS
 
+# --- config write + debounced xray restart ---------------------------------
+# Restarting xray on every UI action would be slow, so restarts are coalesced:
+# the first caller claims a flag file and a worker restarts after a short
+# debounce, while later callers just refresh the flag. config.json is written
+# 0644 so the unprivileged xray process can read it.
 def write_config_and_restart(cfg):
     stamp_fwd_inbounds(cfg)
     atomic_write_json(CONFIG_PATH, cfg, chmod=0o644)
@@ -2856,6 +2877,8 @@ def _fmt_lock_left(sec):
     return "%d 分钟" % minutes
 
 @panel.route("/login", methods=["GET", "POST"])
+# Login is rate-limited per (IP, username): a few bad attempts lock the pair for
+# a few hours. Credentials are verified against panel_auth.json (hashed).
 def login():
     error = None
     if request.method == "POST":
@@ -4051,6 +4074,8 @@ def _panel_state(msg, ok=True):
 
 app.register_blueprint(panel)
 
+# Background traffic collector: only the worker that wins the flock keeps
+# running, so traffic is counted exactly once even with several gunicorn workers.
 def _start_collector():
     import fcntl
     lockf = open("/usr/local/etc/xray/.collector.lock", "w")
