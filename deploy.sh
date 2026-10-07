@@ -14,8 +14,11 @@ HY_SHA_ARM64="a68a61a84452ca250ce0368202521965ca9cc9d801a404f1dc9008ac6cf677a7"
 HY_SHA_ARM="c75aa753fbe1a5263c266244285326ac7fe83617543cea00de2fc4bb79f89db6"
 
 gen_cred() {
-    local n="${1:-20}"
-    LC_ALL=C tr -dc 'A-Za-z0-9!@%^*_-=+.' </dev/urandom | head -c "$n"
+    local n="${1:-20}" s=""
+    while [ "${#s}" -lt "$n" ]; do
+        s="$s$(openssl rand -base64 48 | LC_ALL=C tr -dc 'A-Za-z0-9!@%^*_=+.-')"
+    done
+    printf '%s' "${s:0:$n}"
 }
 
 gen_port() {
@@ -129,9 +132,11 @@ PYEOF
 )"
     echo -e "${YELLOW}[*] Preserving existing panel credentials${NC}"
 else
-    PANEL_USER=$(gen_cred)
-    PANEL_PASS=$(gen_cred)
+    PANEL_USER=$(gen_cred 16)
+    PANEL_PASS=$(gen_cred 20)
 fi
+[ -n "$PANEL_USER" ] || PANEL_USER="admin"
+[ -n "$PANEL_PASS" ] || PANEL_PASS="$(openssl rand -hex 16)"
 
 if [ ! -x /usr/local/bin/hysteria ]; then
 echo -e "${YELLOW}[*] Installing Hysteria2 (apernet/hysteria ${HYSTERIA_VER}, checksum-verified)...${NC}"
