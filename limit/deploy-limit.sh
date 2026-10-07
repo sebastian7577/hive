@@ -11,8 +11,10 @@ UNIT_DIR=/etc/systemd/system
 echo "[*] ensure deps"
 command -v gunicorn >/dev/null 2>&1 || pip3 install flask gunicorn >/dev/null 2>&1 || true
 python3 -c "import flask" 2>/dev/null || pip3 install flask >/dev/null 2>&1 || true
-id hysteria >/dev/null 2>&1 || useradd -r -s /usr/sbin/nologin hysteria
-id limitpanel >/dev/null 2>&1 || useradd -r -s /usr/sbin/nologin -d "$BASE" limitpanel
+getent group hysteria >/dev/null 2>&1 || groupadd -r hysteria
+id hysteria >/dev/null 2>&1 || useradd -r -g hysteria -s /usr/sbin/nologin hysteria
+getent group limitpanel >/dev/null 2>&1 || groupadd -r limitpanel
+id limitpanel >/dev/null 2>&1 || useradd -r -g limitpanel -s /usr/sbin/nologin -d "$BASE" limitpanel
 usermod -aG hysteria limitpanel 2>/dev/null || true
 
 echo "[*] dirs + perms"

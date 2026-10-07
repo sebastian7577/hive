@@ -127,7 +127,8 @@ done
 chmod +x /usr/local/bin/hysteria
 fi
 
-id hysteria >/dev/null 2>&1 || useradd -r -s /bin/false hysteria
+getent group hysteria >/dev/null 2>&1 || groupadd -r hysteria
+id hysteria >/dev/null 2>&1 || useradd -r -g hysteria -s /bin/false hysteria
 
 mkdir -p /etc/hysteria
 if [ ! -f /etc/hysteria/server.crt ]; then
