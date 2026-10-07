@@ -16,18 +16,18 @@ General-purpose panels (3x-ui, Marzban) are **single-admin** or **shared-core mu
 
 - **3x-ui** — single admin; "multi-node" means managing *other* 3x-ui instances.
 - **Marzban** — shared Xray core, user-centric, multi-admin (WIP).
-- **Hive** — per-tenant **separate Xray/Hysteria2 instances**, separate web panel (own port + path), **process-level isolation** (systemd sandbox + non-root + narrow root helper), and a **total quota** that auto-disables the tenant.
+- **Hive** — per-tenant **separate Xray/Hysteria2 processes**, each with its own panel URL (random port + path), **process-level isolation** for the proxies (systemd sandbox + non-root + narrow root helper), and a **total quota** that auto-disables the tenant.
 
 ## Features
 
 - **Main panel** (admin): system status, VLESS (REALITY/TLS/WS/gRPC) nodes, Hysteria2 nodes, port forwarding (中转), end-user management, per-user traffic, ufw firewall card, QR / share link / Clash-YAML export.
-- **Limit (multi-tenant) panel**: every tenant gets an **isolated panel** at its own **random port + random path**, manages **its own** VLESS/Hysteria2/forward nodes and clients, with a **total traffic quota**.
+- **Limit (multi-tenant) panel**: every tenant gets its **own panel URL** (**random port + random path**, with isolated credentials and data) served by one multi-tenant web process, and manages **its own** VLESS/Hysteria2/forward nodes and clients, with a **total traffic quota**.
 - **Quota enforcement**: when a tenant hits the quota, all of its nodes are disabled automatically.
 - **Master switch**: pause/resume **all** limit services with one toggle.
 - **Node control**: every node (including the ones created at install) can be paused and deleted.
 - **Per-tenant isolated instances**: each tenant's Xray runs as its **own process** (`limit-xray@<tenant>`, own config + own stats API) and each Hysteria2 node as its own process too — one tenant (or protocol) failing does not take the others down. The main panel's status card can also restart the main VLESS and Hysteria2 processes independently.
 - **HTTPS panels**: both panels serve TLS with an auto-generated self-signed certificate; the browser shows a one-time warning.
-- **Isolation first**: separate processes, systemd hardening (exposure score down to **1.9–4.0**), the tenant web process runs as a **non-root** user and performs privileged actions only through a **narrow root helper**.
+- **Isolation first**: each tenant's proxies run as separate sandboxed processes (exposure score down to **1.9–4.0**); the tenant web process runs as a **non-root** user and performs privileged actions only through a **narrow root helper**.
 
 ## Install
 
@@ -93,7 +93,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/inst
 | xray (main) | 9.6 UNSAFE | **2.2 OK** |
 | xray-viewer (main panel) | 9.6 | **4.0 OK** |
 | limit-viewer | 7.8 EXPOSED | **3.5 OK** (non-root) |
-| limit-xray | 7.2 | **2.2 OK** |
+| limit-xray@<tenant> | 7.2 | **2.2 OK** |
 | hysteria node | — | **1.9 OK** |
 
 ## Requirements
