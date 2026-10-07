@@ -1,0 +1,45 @@
+[Unit]
+Description=Limit Multi-Tenant Panel
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/limit
+Environment=HOME=/opt/limit
+Environment=MALLOC_ARENA_MAX=2
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/local/bin/gunicorn --chdir /opt/limit -w 1 --threads 2 --timeout 60 --keep-alive 30 -b 0.0.0.0:__PORT__ app:app
+Restart=always
+RestartSec=3
+User=limitpanel
+Group=limitpanel
+SupplementaryGroups=hysteria
+CPUWeight=50
+IOWeight=50
+# isolation: hide the main panel + main xray + main hysteria secrets from this service
+InaccessiblePaths=/opt/xray-viewer /usr/local/etc/xray /etc/hysteria /root
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RemoveIPC=yes
+UMask=0027
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+
+[Install]
+WantedBy=multi-user.target

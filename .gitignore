@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Build artifacts / packages
+*.tar.gz
+*.zip
+build/
+dist/
+
+# Runtime data & secrets (never commit)
+data/
+secret_key
+server_ip
+panel_port
+*.db
+*.log
+
+# Backups
+*.bak
+*.bak.*
+*.bak-*
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
