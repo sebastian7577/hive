@@ -9,7 +9,7 @@ WorkingDirectory=/opt/limit
 Environment=HOME=/opt/limit
 Environment=MALLOC_ARENA_MAX=2
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/usr/local/bin/gunicorn --chdir /opt/limit -w 1 --threads 2 --timeout 60 --keep-alive 30 -b 0.0.0.0:__PORT__ app:app
+ExecStart=/usr/local/bin/gunicorn --chdir /opt/limit -w 1 --threads 2 --timeout 60 --keep-alive 30 -b 0.0.0.0:__PORT__ --certfile /opt/limit/tls.crt --keyfile /opt/limit/tls.key app:app
 Restart=always
 RestartSec=3
 User=limitpanel

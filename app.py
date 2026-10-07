@@ -1,4 +1,4 @@
-import json, os, functools, datetime, subprocess, uuid, shutil, secrets, sys, threading, time, re, hashlib, socket
+import json, os, functools, datetime, subprocess, uuid, shutil, secrets, sys, threading, time, re, hashlib, hmac, socket
 from urllib.parse import quote
 sys.path.insert(0, os.path.dirname(__file__))
 from flask import Flask, Blueprint, request, session, redirect, url_for, render_template_string, jsonify
@@ -59,9 +59,19 @@ def _load_secret_key():
     return s
 
 app.secret_key = _load_secret_key()
+TLS_CRT_FILE = "/opt/xray-viewer/tls.crt"
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
                   SESSION_COOKIE_NAME="admin_sess",
+                  SESSION_COOKIE_SECURE=os.path.exists(TLS_CRT_FILE),
                   PERMANENT_SESSION_LIFETIME=datetime.timedelta(hours=1))
+
+@app.after_request
+def _security_headers(resp):
+    if os.path.exists(TLS_CRT_FILE):
+        resp.headers["Strict-Transport-Security"] = "max-age=31536000"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["X-Frame-Options"] = "DENY"
+    return resp
 
 PANEL_PREFIX_FILE = "/opt/xray-viewer/url_prefix"
 SERVER_IP_FILE = "/opt/xray-viewer/server_ip"
@@ -92,6 +102,39 @@ panel = Blueprint("panel", __name__, url_prefix=PANEL_PREFIX)
 
 USERNAME = "admin"
 PASSWORD = "admin"
+AUTH_FILE = "/opt/xray-viewer/panel_auth.json"
+
+def _hash_pw(pw, salt=None):
+    if salt is None:
+        salt = secrets.token_hex(16)
+    dk = hashlib.pbkdf2_hmac("sha256", pw.encode(), bytes.fromhex(salt), 200000)
+    return "pbkdf2_sha256$200000$%s$%s" % (salt, dk.hex())
+
+def _verify_pw(pw, stored):
+    try:
+        _algo, iters, salt, h = stored.split("$")
+        dk = hashlib.pbkdf2_hmac("sha256", pw.encode(), bytes.fromhex(salt), int(iters))
+        return hmac.compare_digest(dk.hex(), h)
+    except Exception:
+        return False
+
+def _auth():
+    try:
+        d = json.load(open(AUTH_FILE))
+        u = d.get("username"); h = d.get("password_hash")
+        if u and h:
+            return u, h
+    except Exception:
+        pass
+    return USERNAME, _hash_pw(PASSWORD)
+
+def _save_auth(username, password_hash):
+    tmp = AUTH_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump({"username": username, "password_hash": password_hash}, f)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, AUTH_FILE)
+
 CONFIG_PATH = "/usr/local/etc/xray/config.json"
 DISABLED_PATH = "/usr/local/etc/xray/disabled_clients.json"
 DISABLED_INBOUNDS_PATH = "/usr/local/etc/xray/disabled_inbounds.json"
@@ -104,8 +147,8 @@ XRAY_SERVICE_NAME = "xray"
 DEFAULT_FLOW = "xtls-rprx-vision"
 TLS_CERT_FILE = "/etc/hysteria/server.crt"
 TLS_KEY_FILE = "/etc/hysteria/server.key"
-PROTECTED_PORTS = {443, 10085}
-PROTECTED_HY2_IDS = {"hy2-443"}
+PROTECTED_PORTS = {10085}
+PROTECTED_HY2_IDS = set()
 ADMIN_USERS = {"admin"}
 VLESS_PROTOCOLS = {"vless"}
 HY2_STATS_HOST = "127.0.0.1"
@@ -603,6 +646,7 @@ PANEL_HTML = r"""
   <div style="display:flex;align-items:center;gap:12px;">
     <button type="button" class="theme-btn" id="themeBtn" onclick="toggleTheme()" title="切换日夜主题">☾</button>
     <span class="tag mono" title="版本">v1.10</span>
+    <a class="logout-link" href="javascript:void(0)" onclick="openPwModal()">修改密码</a>
     <a class="logout-link" href="{{ url_for('panel.logout') }}">退出登录</a>
   </div>
 </div>
@@ -1129,6 +1173,20 @@ PANEL_HTML = r"""
   </div>
 </div>
 
+<div class="modal-backdrop" id="pwModal">
+  <div class="modal-box" style="width:420px;">
+    <h3>修改面板密码</h3>
+    <form class="async-form" method="post" action="{{ url_for('panel.change_password') }}">
+      <div class="full"><label>原密码</label><input type="password" name="old" required autocomplete="current-password"></div>
+      <div class="full" style="margin-top:12px;"><label>新密码（至少 8 位）</label><input type="password" name="new" required minlength="8" autocomplete="new-password"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn-cancel" onclick="closeModals()">取消</button>
+        <button type="submit" class="btn-sm">确认修改</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div class="modal-backdrop" id="addNodeModal">
   <div class="modal-box" style="width:520px;">
     <h3 id="addNodeTitle">为用户添加节点</h3>
@@ -1211,7 +1269,7 @@ var svXrayWasRunning = Date.now();
 const REALITY_SITES = ["www.amazon.com","www.google.com","www.cloudflare.com","www.microsoft.com","www.apple.com","www.netflix.com","www.youtube.com","www.wikipedia.org","www.github.com","www.zoom.us","www.discord.com","www.linkedin.com","www.facebook.com","www.bing.com","www.office.com","www.shopify.com","www.salesforce.com","www.adobe.com","www.spotify.com","www.twitch.tv"];
 const LINKED_SNI_ROW = 'vl-sni';
 function randomOpenPort(){
-  const used = new Set([443, 10085]);
+  const used = new Set([10085]);
   NODES.forEach(n => used.add(Number(n.port)));
   HY2.forEach(h => used.add(Number(h.port)));
   FWD.forEach(f => used.add(Number(f.listen_port)));
@@ -1239,7 +1297,8 @@ function switchSni(which){
     }
   }
 }
-function closeModals(){ ['vlessModal','hy2Modal','fwdModal','addUserModal','addNodeModal','hy2PassModal','qrModal'].forEach(id => { const el = $(id); if (el) el.classList.remove('open'); }); }
+function closeModals(){ ['vlessModal','hy2Modal','fwdModal','addUserModal','addNodeModal','hy2PassModal','qrModal','pwModal'].forEach(id => { const el = $(id); if (el) el.classList.remove('open'); }); }
+function openPwModal(){ $('pwModal').classList.add('open'); }
 function showQR(text, title){
   $('qrTitle').textContent = title || '节点二维码';
   $('qrLink').textContent = text || '';
@@ -1958,7 +2017,7 @@ def load_users():
     return data
 
 def save_users(data):
-    atomic_write_json(USERS_PATH, data)
+    atomic_write_json(USERS_PATH, data, chmod=0o644)
 
 def migrate_users():
     """首次运行：从现有 xray config + disabled_clients + hy2_nodes 构建 users.json。
@@ -2170,7 +2229,7 @@ def load_hy2_nodes():
     return out
 
 def save_hy2_nodes(nodes):
-    atomic_write_json(HY2_NODES_PATH, nodes)
+    atomic_write_json(HY2_NODES_PATH, nodes, chmod=0o644)
 
 def load_disabled_inbounds():
     if not os.path.exists(DISABLED_INBOUNDS_PATH):
@@ -2183,7 +2242,7 @@ def load_disabled_inbounds():
     return data if isinstance(data, list) else []
 
 def save_disabled_inbounds(items):
-    atomic_write_json(DISABLED_INBOUNDS_PATH, items)
+    atomic_write_json(DISABLED_INBOUNDS_PATH, items, chmod=0o644)
 
 def _yaml_quote(s):
     return json.dumps(str(s), ensure_ascii=False)
@@ -2583,7 +2642,7 @@ def inbound_is_protected(port):
 
 def write_config_and_restart(cfg):
     stamp_fwd_inbounds(cfg)
-    atomic_write_json(CONFIG_PATH, cfg)
+    atomic_write_json(CONFIG_PATH, cfg, chmod=0o644)
 
     schedule_xray_restart()
     return True, None
@@ -2802,16 +2861,18 @@ def login():
     if request.method == "POST":
         ip = request.remote_addr or "?"
         user = (request.form.get("username") or "").strip()
+        pw = request.form.get("password") or ""
         left = _login_lock_left(ip, user)
         if left > 0:
             error = "该 IP 的账号 %s 已锁定，剩余 %s 自动解锁" % (user, _fmt_lock_left(left))
-        elif request.form.get("username") == USERNAME and request.form.get("password") == PASSWORD:
-            _login_lock_clear(ip, user)
-            session["logged_in"] = True
-            session.permanent = True
-            session["last_activity"] = time.time()
-            return redirect(url_for("panel.index"))
         else:
+            au, ah = _auth()
+            if user == au and _verify_pw(pw, ah):
+                _login_lock_clear(ip, user)
+                session["logged_in"] = True
+                session.permanent = True
+                session["last_activity"] = time.time()
+                return redirect(url_for("panel.index"))
             left = _login_lock_fail(ip, user)
             if left > 0:
                 error = ("密码错误已达 %d 次，该 IP 的账号 %s 已锁定 6 小时，"
@@ -2824,6 +2885,23 @@ def login():
 def logout():
     session.clear()
     return redirect(url_for("panel.login"))
+
+@panel.route("/password", methods=["POST"])
+@login_required
+def change_password():
+    try:
+        old = request.form.get("old") or ""
+        new = request.form.get("new") or ""
+        au, ah = _auth()
+        if not _verify_pw(old, ah):
+            raise RuntimeError("原密码错误")
+        if len(new) < 8:
+            raise RuntimeError("新密码至少 8 位")
+        _save_auth(au, _hash_pw(new))
+        msg = "密码已更新"
+    except Exception as e:
+        return _panel_state("修改密码失败：%s" % e, False)
+    return _panel_state(msg, True)
 
 def _gen_unique_uid(users, exclude_name=None):
     """生成与其他所有用户 password 均不冲突的随机 UUID 值。"""

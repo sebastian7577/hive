@@ -7,19 +7,21 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+# Official Hysteria2 (github.com/apernet/hysteria) pinned release + SHA256 of the Linux binaries.
+HYSTERIA_VER="app/v2.13.0"
+HY_SHA_AMD64="907ba8c9693edb104b20582681fb7dc15639d5b64a9cbb616a7b539190a86691"
+HY_SHA_ARM64="a68a61a84452ca250ce0368202521965ca9cc9d801a404f1dc9008ac6cf677a7"
+HY_SHA_ARM="c75aa753fbe1a5263c266244285326ac7fe83617543cea00de2fc4bb79f89db6"
+
 gen_cred() {
-    local len=$(( RANDOM % 5 + 8 ))
-    local U='ABCDEFGHJKLMNPQRSTUVWXYZ'
-    local L='abcdefghijkmnpqrstuvwxyz'
-    local D='23456789'
-    local S='!@%^*_-=+.'
-    local A="${U}${L}${D}${S}"
-    local s="${U:RANDOM%${#U}:1}${L:RANDOM%${#L}:1}${D:RANDOM%${#D}:1}${S:RANDOM%${#S}:1}"
-    local i
-    for (( i=${#s}; i<len; i++ )); do
-        s+="${A:RANDOM%${#A}:1}"
-    done
-    printf '%s' "$s" | fold -w1 | shuf | tr -d '\n'
+    local n="${1:-20}"
+    LC_ALL=C tr -dc 'A-Za-z0-9!@%^*_-=+.' </dev/urandom | head -c "$n"
+}
+
+gen_port() {
+    local lo="${1:-10000}" hi="${2:-65000}" r
+    r=$(( 0x$(openssl rand -hex 4) ))
+    echo $(( lo + r % (hi - lo + 1) ))
 }
 
 echo -e "${GREEN}========================================${NC}"
@@ -31,6 +33,9 @@ if [ "$(id -u)" -ne 0 ]; then
     echo -e "${RED}Error: Must run as root${NC}"
     exit 1
 fi
+
+RESET_FW=0
+for a in "$@"; do [ "$a" = "--reset-firewall" ] && RESET_FW=1; done
 
 UNIT_DIR=/etc/systemd/system
 DEST=/opt/xray-viewer
@@ -45,7 +50,7 @@ if [ -f "$UNIT_DIR/xray-viewer.service" ]; then
     PANEL_PORT=$(grep -oE -- '-b 0\.0\.0\.0:[0-9]+' "$UNIT_DIR/xray-viewer.service" | grep -oE '[0-9]+$' | head -n1)
 fi
 if [ -z "$PANEL_PORT" ]; then
-    PANEL_PORT=$((RANDOM % 55000 + 10000))
+    PANEL_PORT=$(gen_port 10000 65000)
     echo -e "${YELLOW}[*] Random panel port: ${PANEL_PORT}${NC}"
 else
     echo -e "${YELLOW}[*] Existing panel port: ${PANEL_PORT}${NC}"
@@ -57,6 +62,32 @@ if [ -f "$DEST/url_prefix" ]; then
 else
     PANEL_PATH="/$(openssl rand -hex 5)"
     echo -e "${YELLOW}[*] Random panel path: ${PANEL_PATH}${NC}"
+fi
+
+echo -e "${YELLOW}[*] Detecting server IP...${NC}"
+SERVER_IP=""
+for url in "https://api.ipify.org" "https://ipv4.icanhazip.com" "https://ifconfig.me/ip"; do
+  SERVER_IP=$(curl -4 -sL --max-time 8 "$url" 2>/dev/null | tr -d '[:space:]')
+  if [ -n "$SERVER_IP" ] && [[ "$SERVER_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    break
+  fi
+  SERVER_IP=""
+done
+[ -z "$SERVER_IP" ] && SERVER_IP="YOUR_SERVER_IP"
+echo -e "${YELLOW}[*] Server IP: ${SERVER_IP}${NC}"
+
+mkdir -p "$DEST"
+if [ "$FRESH" -eq 1 ] || [ ! -f "$DEST/tls.crt" ]; then
+    echo -e "${YELLOW}[*] Generating self-signed TLS certificate for the panel...${NC}"
+    openssl req -x509 -nodes -newkey rsa:2048 \
+        -keyout "$DEST/tls.key" -out "$DEST/tls.crt" \
+        -days 3650 -subj "/CN=${SERVER_IP}" \
+        -addext "subjectAltName=IP:${SERVER_IP},DNS:localhost" >/dev/null 2>&1 || \
+    openssl req -x509 -nodes -newkey rsa:2048 \
+        -keyout "$DEST/tls.key" -out "$DEST/tls.crt" \
+        -days 3650 -subj "/CN=${SERVER_IP}" >/dev/null 2>&1 || true
+    chmod 600 "$DEST/tls.key" 2>/dev/null || true
+    chmod 644 "$DEST/tls.crt" 2>/dev/null || true
 fi
 
 echo -e "${YELLOW}[*] Installing dependencies...${NC}"
@@ -103,27 +134,26 @@ else
 fi
 
 if [ ! -x /usr/local/bin/hysteria ]; then
-echo -e "${YELLOW}[*] Installing Hysteria2...${NC}"
-HYSTERIA_VER=$(curl -sL https://api.github.com/repos/HyNetworks/hysteria/releases/latest | grep '"tag_name"' | sed 's/.*"tag_name": *"//;s/".*//')
-if [ -z "$HYSTERIA_VER" ]; then
-    HYSTERIA_VER="app/v2.12.2"
-fi
+echo -e "${YELLOW}[*] Installing Hysteria2 (apernet/hysteria ${HYSTERIA_VER}, checksum-verified)...${NC}"
 HYSTERIA_ARCH=$(uname -m)
 case "$HYSTERIA_ARCH" in
-    x86_64)  HY_ARCH="amd64" ;;
-    aarch64) HY_ARCH="arm64" ;;
-    armv7l)  HY_ARCH="armv7" ;;
+    x86_64)  HY_ARCH="amd64"; HY_SHA="${HY_SHA_AMD64}" ;;
+    aarch64) HY_ARCH="arm64"; HY_SHA="${HY_SHA_ARM64}" ;;
+    armv7l)  HY_ARCH="arm";   HY_SHA="${HY_SHA_ARM}" ;;
     *)       echo -e "${RED}Unsupported arch: $HYSTERIA_ARCH${NC}"; exit 1 ;;
 esac
-HY_URL="https://github.com/HyNetworks/hysteria/releases/download/${HYSTERIA_VER}/hysteria-linux-${HY_ARCH}"
-for attempt in 1 2 3; do
-    curl -sL --retry 3 --retry-delay 2 "$HY_URL" -o /usr/local/bin/hysteria || true
-    if [ -s /usr/local/bin/hysteria ] && head -c4 /usr/local/bin/hysteria | grep -q $'\x7fELF'; then
-        break
-    fi
-    echo -e "${YELLOW}[*] hysteria download attempt ${attempt} failed, retrying...${NC}"
-    sleep 2
-done
+HY_URL="https://github.com/apernet/hysteria/releases/download/${HYSTERIA_VER}/hysteria-linux-${HY_ARCH}"
+curl --proto '=https' --tlsv1.2 -SfL --retry 3 --retry-delay 2 "$HY_URL" -o /usr/local/bin/hysteria || true
+if [ ! -s /usr/local/bin/hysteria ]; then
+    echo -e "${RED}[!] Failed to download hysteria.${NC}"; exit 1
+fi
+HY_ACTUAL=$(sha256sum /usr/local/bin/hysteria | awk '{print $1}')
+if [ -z "$HY_SHA" ] || [ "$HY_ACTUAL" != "$HY_SHA" ]; then
+    echo -e "${RED}[!] Hysteria checksum mismatch for ${HY_ARCH} (expected '${HY_SHA}', got '${HY_ACTUAL}'). Aborting.${NC}"
+    rm -f /usr/local/bin/hysteria
+    exit 1
+fi
+echo -e "${GREEN}[*] Hysteria2 checksum verified (${HY_ARCH}).${NC}"
 chmod +x /usr/local/bin/hysteria
 fi
 
@@ -290,22 +320,46 @@ chown -R hysteria:hysteria /etc/hysteria
 [ -f /usr/local/etc/xray/disabled_inbounds.json ] || echo "[]" > /usr/local/etc/xray/disabled_inbounds.json
 [ -f /usr/local/etc/xray/traffic_totals.json ] || echo "{}" > /usr/local/etc/xray/traffic_totals.json
 [ -f /usr/local/etc/xray/fwd.json ] || echo "[]" > /usr/local/etc/xray/fwd.json
+# xray runs as an unprivileged user, so its config must be readable by it
+chmod 644 /usr/local/etc/xray/*.json 2>/dev/null || true
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cp "$SCRIPT_DIR/app.py" /opt/xray-viewer/app.py
-PANEL_USER="$PANEL_USER" PANEL_PASS="$PANEL_PASS" python3 - <<'PYEOF'
-import os, re
-p = "/opt/xray-viewer/app.py"
-s = open(p, encoding="utf-8").read()
-u = os.environ["PANEL_USER"]; pw = os.environ["PANEL_PASS"]
-s = re.sub(r'^USERNAME = .*$', 'USERNAME = %r' % u, s, count=1, flags=re.M)
-s = re.sub(r'^PASSWORD = .*$', 'PASSWORD = %r' % pw, s, count=1, flags=re.M)
-assert ("USERNAME = %r" % u) in s, "USERNAME inject failed"
-assert ("PASSWORD = %r" % pw) in s, "PASSWORD inject failed"
-open(p, "w", encoding="utf-8").write(s)
-print("[*] Panel credentials injected")
+
+# Credentials live OUTSIDE the code, salted+hashed, in /opt/xray-viewer/panel_auth.json.
+PANEL_USER="$PANEL_USER" PANEL_PASS="$PANEL_PASS" FRESH="$FRESH" python3 - <<'PYEOF'
+import os, json, re, ast, hashlib, secrets
+auth = "/opt/xray-viewer/panel_auth.json"
+app = "/opt/xray-viewer/app.py"
+u = os.environ.get("PANEL_USER") or ""
+pw = os.environ.get("PANEL_PASS") or ""
+fresh = os.environ.get("FRESH") != "0"
+if (not fresh) and (not os.path.exists(auth)) and os.path.exists(app):
+    try:
+        s = open(app, encoding="utf-8").read()
+        mu = re.search(r'^USERNAME = (.*)$', s, re.M)
+        mp = re.search(r'^PASSWORD = (.*)$', s, re.M)
+        if mu: u = ast.literal_eval(mu.group(1).strip())
+        if mp: pw = ast.literal_eval(mp.group(1).strip())
+        print("[*] Migrating existing panel credentials to hashed storage")
+    except Exception as e:
+        print("[!] credential migration skipped:", e)
+if not os.path.exists(auth):
+    salt = secrets.token_hex(16)
+    dk = hashlib.pbkdf2_hmac("sha256", pw.encode(), bytes.fromhex(salt), 200000)
+    h = "pbkdf2_sha256$200000$%s$%s" % (salt, dk.hex())
+    tmp = auth + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump({"username": u, "password_hash": h}, f)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, auth)
+    print("[*] Panel credentials written to panel_auth.json (hashed)")
+else:
+    print("[*] Preserving existing panel credentials")
 PYEOF
+
+cp "$SCRIPT_DIR/app.py" /opt/xray-viewer/app.py
 cp "$SCRIPT_DIR/traffic_store.py" /opt/xray-viewer/traffic_store.py
+chmod 600 /opt/xray-viewer/panel_auth.json 2>/dev/null || true
 echo "${PANEL_PATH}" > /opt/xray-viewer/url_prefix
 chmod 644 /opt/xray-viewer/url_prefix
 
@@ -372,7 +426,7 @@ Type=simple
 WorkingDirectory=/opt/xray-viewer
 Environment=MALLOC_ARENA_MAX=2
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/usr/local/bin/gunicorn --chdir /opt/xray-viewer -w 1 --threads 2 --timeout 60 --keep-alive 30 -b 0.0.0.0:${PANEL_PORT} app:app
+ExecStart=/usr/local/bin/gunicorn --chdir /opt/xray-viewer -w 1 --threads 2 --timeout 60 --keep-alive 30 -b 0.0.0.0:${PANEL_PORT} --certfile /opt/xray-viewer/tls.crt --keyfile /opt/xray-viewer/tls.key app:app
 Restart=always
 RestartSec=3
 User=root
@@ -457,34 +511,44 @@ if systemctl list-unit-files hysteria-server.service >/dev/null 2>&1 && \
 fi
 
 echo -e "${YELLOW}[*] Configuring firewall...${NC}"
-if [ "$FRESH" -eq 1 ]; then
-    ufw --force reset >/dev/null 2>&1
+if [ "$RESET_FW" -eq 1 ]; then
+    echo -e "${YELLOW}[*] --reset-firewall given: resetting ufw to a clean state${NC}"
+    ufw --force reset >/dev/null 2>&1 || true
 fi
-ufw allow 22/tcp >/dev/null 2>&1
-ufw allow 443/tcp >/dev/null 2>&1
-ufw allow 443/udp >/dev/null 2>&1
-ufw --force enable >/dev/null 2>&1
+# Never lock ourselves out: always allow the SSH port(s) actually in use (config + live session).
+SSH_PORTS="22"
+if [ -f /etc/ssh/sshd_config ]; then
+    P=$(grep -iE '^[[:space:]]*Port[[:space:]]+[0-9]+' /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}')
+    [ -n "$P" ] && SSH_PORTS="$SSH_PORTS $P"
+fi
+if [ -n "$SSH_CONNECTION" ]; then
+    P=$(echo "$SSH_CONNECTION" | awk '{print $4}')
+    [ -n "$P" ] && SSH_PORTS="$SSH_PORTS $P"
+fi
+for p in $(echo "$SSH_PORTS" | tr ' ' '\n' | grep -E '^[0-9]+$' | sort -u); do
+    ufw allow "${p}/tcp" >/dev/null 2>&1 || true
+done
+ufw allow 443/tcp >/dev/null 2>&1 || true
+ufw allow 443/udp >/dev/null 2>&1 || true
+ufw allow "${PANEL_PORT}/tcp" >/dev/null 2>&1 || true
+ufw --force enable >/dev/null 2>&1 || true
+echo -e "${YELLOW}[*] ufw: panel port ${PANEL_PORT}/tcp allowed (Anywhere); existing rules preserved${NC}"
 
 echo -e "${YELLOW}[*] Starting services...${NC}"
 systemctl daemon-reload
 systemctl enable --now hysteria-node@hy2-443 >/dev/null 2>&1 || true
 systemctl enable --now xray >/dev/null 2>&1 || true
 systemctl enable --now xray-viewer >/dev/null 2>&1 || true
+# restart so an updated unit (ExecStart etc.) actually takes effect on upgrade
+systemctl restart hysteria-node@hy2-443 >/dev/null 2>&1 || true
+systemctl restart xray >/dev/null 2>&1 || true
+systemctl restart xray-viewer >/dev/null 2>&1 || true
 
 for i in 1 2 3 4 5 6 7 8; do
     if systemctl is-active --quiet xray && systemctl is-active --quiet xray-viewer && systemctl is-active --quiet hysteria-node@hy2-443; then break; fi
     sleep 1
 done
 
-SERVER_IP=""
-for url in "https://api.ipify.org" "https://ipv4.icanhazip.com" "https://ifconfig.me/ip"; do
-  SERVER_IP=$(curl -4 -sL --max-time 8 "$url" 2>/dev/null | tr -d '[:space:]')
-  if [ -n "$SERVER_IP" ] && [[ "$SERVER_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    break
-  fi
-  SERVER_IP=""
-done
-[ -z "$SERVER_IP" ] && SERVER_IP="YOUR_SERVER_IP"
 echo "${SERVER_IP}" > /opt/xray-viewer/server_ip
 chmod 644 /opt/xray-viewer/server_ip
 
@@ -540,16 +604,15 @@ echo ""
 fi
 
 echo -e "${GREEN}--- Web Panel (v1.10) ---${NC}"
-echo -e "  URL:        http://${SERVER_IP}:${PANEL_PORT}${PANEL_PATH}/login"
-echo -e "  Username:   ${PANEL_USER}"
-echo -e "  Password:   ${PANEL_PASS}"
+echo -e "  URL:        ${YELLOW}https://${SERVER_IP}:${PANEL_PORT}${PANEL_PATH}/login${NC}"
+if [ "$FRESH" -eq 1 ]; then
+    echo -e "  Username:   ${PANEL_USER}"
+    echo -e "  Password:   ${PANEL_PASS}"
+else
+    echo -e "  Username/Password: 保持不变（见首次安装记录；可在面板内修改）"
+fi
 echo -e "  Panel Port: ${PANEL_PORT}"
 echo -e "  Panel Path: ${PANEL_PATH}"
-echo -e "  ${YELLOW}安全提示：面板端口 ${PANEL_PORT} 默认对 Anywhere 开放，请尽快在面板『防火墙』卡片中放行你的固定 IP 并删除 Anywhere 规则。${NC}"
-echo -e "  面板功能：系统状态 / vless 节点 / hy2 节点 / 中转 / 用户管理 / 流量统计"
-echo ""
-
-echo -e "${YELLOW}  [!] Run these to allow panel access:${NC}"
-echo -e "  ufw allow from YOUR_IP to any port ${PANEL_PORT} proto tcp"
-echo -e "  ufw reload"
+echo -e "  ${YELLOW}自签证书：浏览器会提示证书不受信任，这是预期的，确认后即可访问。${NC}"
+echo -e "  ${YELLOW}安全提示：面板端口 ${PANEL_PORT} 已对 Anywhere 放行，建议尽快在面板『防火墙』卡片中改为只放行你的固定 IP。${NC}"
 echo ""

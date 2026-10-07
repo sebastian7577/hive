@@ -17,6 +17,8 @@ getent group limitpanel >/dev/null 2>&1 || groupadd -r limitpanel
 id limitpanel >/dev/null 2>&1 || useradd -r -g limitpanel -s /usr/sbin/nologin -d "$BASE" limitpanel
 usermod -aG hysteria limitpanel 2>/dev/null || true
 
+IP=$(curl -4 -sL --max-time 8 https://api.ipify.org 2>/dev/null | tr -d '[:space:]')
+
 echo "[*] dirs + perms"
 mkdir -p "$DATA" "$BASE/xray" "$BASE/hysteria/conf.d"
 chown limitpanel:limitpanel "$BASE" "$BASE/xray"
@@ -52,6 +54,21 @@ fi
 chown limitpanel:hysteria "$BASE/hysteria/server.key" "$BASE/hysteria/server.crt" 2>/dev/null || true
 chmod 640 "$BASE/hysteria/server.key" "$BASE/hysteria/server.crt" 2>/dev/null || true
 
+echo "[*] panel self-signed TLS cert"
+if [ ! -f "$BASE/tls.crt" ]; then
+    SAN_IP="${IP:-localhost}"
+    openssl req -x509 -nodes -newkey rsa:2048 \
+        -keyout "$BASE/tls.key" -out "$BASE/tls.crt" \
+        -days 3650 -subj "/CN=${SAN_IP}" \
+        -addext "subjectAltName=IP:${SAN_IP},DNS:localhost" >/dev/null 2>&1 || \
+    openssl req -x509 -nodes -newkey rsa:2048 \
+        -keyout "$BASE/tls.key" -out "$BASE/tls.crt" \
+        -days 3650 -subj "/CN=${SAN_IP}" >/dev/null 2>&1 || true
+fi
+chown limitpanel:limitpanel "$BASE/tls.key" "$BASE/tls.crt" 2>/dev/null || true
+chmod 600 "$BASE/tls.key" 2>/dev/null || true
+chmod 644 "$BASE/tls.crt" 2>/dev/null || true
+
 echo "[*] seed tenants.json"
 [ -f "$DATA/tenants.json" ] || echo '{"tenants": []}' > "$DATA/tenants.json"
 chown limitpanel:limitpanel "$DATA/tenants.json" 2>/dev/null || true
@@ -85,7 +102,7 @@ if [ -f "$UNIT_DIR/limit-viewer.service" ]; then
 fi
 if [ -z "$PORT" ]; then
     while :; do
-        P=$(shuf -i 50000-60000 -n 1)
+        P=$(( 50000 + 0x$(openssl rand -hex 4) % 10001 ))
         if ! ss -ltn 2>/dev/null | awk '{print $4}' | grep -q "[:.]${P}\$"; then PORT=$P; break; fi
     done
 fi
@@ -118,7 +135,6 @@ chmod 700 /opt/xray-viewer 2>/dev/null || true
 chmod 600 /opt/xray-viewer/app.py /opt/xray-viewer/traffic_store.py /opt/xray-viewer/secret_key 2>/dev/null || true
 rm -f /usr/local/etc/xray/config.json.bak* 2>/dev/null || true
 
-IP=$(curl -4 -sL --max-time 8 https://api.ipify.org 2>/dev/null)
 [ -z "$IP" ] && IP="<SERVER_IP>"
 
 echo ""
@@ -128,7 +144,7 @@ echo "=================================================="
 echo "  limit-helper: $(systemctl is-active limit-helper)"
 echo "  limit-xray : $(systemctl is-active limit-xray)"
 echo "  limit-viewer: $(systemctl is-active limit-viewer)  (port ${PORT}, user limitpanel)"
-echo "  面板地址   : http://${IP}:${PORT}/<租户路径>/login"
+echo "  面板地址   : https://${IP}:${PORT}/<租户路径>/login  (自签证书，浏览器会提示不受信任)"
 echo "  租户由主面板“limit用户”卡片开通（会生成路径+账号+密码）"
 echo "=================================================="
 

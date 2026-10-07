@@ -2,10 +2,9 @@
 
 > **One server, many isolated tenants.** A multi-tenant Xray (VLESS/REALITY) + Hysteria2 panel with a built-in reseller sub-panel, per-tenant traffic quotas, and process-level isolation.
 
-> ⚠️ **This is the very first version (v1.10).** It is early and rough: features are
-> incomplete, docs are thin, and there are certainly bugs we haven't found yet.
-> It works for the author's use case, but please treat it as a starting point
-> rather than a finished product. Issues and pull requests are very welcome.
+> ⚠️ This is the initial version. It is early and rough: features are incomplete,
+> docs are thin, and there are certainly bugs we haven't found yet. Treat it as a
+> starting point rather than a finished product. Issues and pull requests are welcome.
 
 [中文说明](README.zh-CN.md)
 
@@ -19,14 +18,14 @@ General-purpose panels (3x-ui, Marzban) are **single-admin** or **shared-core mu
 - **Marzban** — shared Xray core, user-centric, multi-admin (WIP).
 - **Hive** — per-tenant **separate Xray/Hysteria2 instances**, separate web panel (own port + path), **process-level isolation** (systemd sandbox + non-root + narrow root helper), and a **total quota** that auto-disables the tenant.
 
-If you run several resellers/clients and want one management entry that is cheaper and easier than "install one panel per customer", Hive is for you.
-
 ## Features
 
 - **Main panel** (admin): system status, VLESS (REALITY/TLS/WS/gRPC) nodes, Hysteria2 nodes, port forwarding (中转), end-user management, per-user traffic, ufw firewall card, QR / share link / Clash-YAML export.
 - **Limit (multi-tenant) panel**: every tenant gets an **isolated panel** at its own **random port + random path**, manages **its own** VLESS/Hysteria2/forward nodes and clients, with a **total traffic quota**.
-- **Quota enforcement**: when a tenant hits the quota, all of its nodes are disabled automatically; the tenant sees *"traffic exhausted, contact the admin"*.
+- **Quota enforcement**: when a tenant hits the quota, all of its nodes are disabled automatically.
 - **Master switch**: pause/resume **all** limit services with one toggle.
+- **HTTPS panels**: both panels serve TLS with an auto-generated self-signed certificate; the browser shows a one-time warning.
+- **Credentials hashed**: the panel password is stored salted+hashed (PBKDF2) outside the code, and can be changed from the panel.
 - **Isolation first**: separate processes, systemd hardening (exposure score down to **1.9–4.0**), the tenant web process runs as a **non-root** user and performs privileged actions only through a **narrow root helper**.
 
 ## Install
@@ -37,15 +36,9 @@ One line, on a fresh **Debian/Ubuntu** VPS (as root):
 bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/install.sh)
 ```
 
-It installs Xray-core, Hysteria2, the main panel and the multi-tenant (limit) panel, and prints the panel URL / random path / credentials.
+It installs Xray-core, Hysteria2, the main panel and the multi-tenant (limit) panel, then prints the `https://` URL, the random path and the generated credentials. The certificate is self-signed, so the browser will warn once — that is expected.
 
-**Update** (keeps your nodes, users, tenants, port, path and credentials):
-
-```bash
-hive
-```
-
-Uninstall:
+Run the same command again to update in place (your nodes, users, tenants, port and path are kept). To remove:
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/install.sh) uninstall
@@ -88,8 +81,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/inst
 ## Requirements
 
 - Debian/Ubuntu, root, systemd.
-- Python 3 + gunicorn + flask (installed by the scripts).
-- Xray-core and Hysteria2 (installed by the scripts).
+- Python 3 + gunicorn + flask (installed by the script).
+- Xray-core and Hysteria2 (installed by the script).
 
 ## License
 

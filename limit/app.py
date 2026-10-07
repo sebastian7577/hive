@@ -146,9 +146,19 @@ def _server_ip():
 
 SERVER_IP = _server_ip()
 app.secret_key = _load_secret()
+_TLS_CRT = BASE + "/tls.crt"
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
                   SESSION_COOKIE_NAME="limit_sess",
+                  SESSION_COOKIE_SECURE=os.path.exists(_TLS_CRT),
                   PERMANENT_SESSION_LIFETIME=datetime.timedelta(hours=1))
+
+@app.after_request
+def _security_headers(resp):
+    if os.path.exists(_TLS_CRT):
+        resp.headers["Strict-Transport-Security"] = "max-age=31536000"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["X-Frame-Options"] = "DENY"
+    return resp
 
 
 def _base_port():
