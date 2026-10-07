@@ -447,6 +447,7 @@ StartLimitIntervalSec=0
 [Service]
 Type=simple
 WorkingDirectory=/opt/xray-viewer
+Environment=HOME=/opt/xray-viewer
 Environment=MALLOC_ARENA_MAX=2
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/usr/local/bin/gunicorn --chdir /opt/xray-viewer -w 1 --threads 2 --timeout 60 --keep-alive 30 -b 0.0.0.0:${PANEL_PORT} --certfile /opt/xray-viewer/tls.crt --keyfile /opt/xray-viewer/tls.key app:app
