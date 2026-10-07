@@ -12,6 +12,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BASE=/opt/limit
 DATA=$BASE/data
 UNIT_DIR=/etc/systemd/system
+FRESH=1
+[ -f "$BASE/app.py" ] && FRESH=0
 
 echo "[*] ensure deps"
 command -v gunicorn >/dev/null 2>&1 || pip3 install flask gunicorn >/dev/null 2>&1 || true
@@ -126,10 +128,23 @@ systemctl daemon-reload
 echo "[*] start services"
 systemctl enable --now limit-helper >/dev/null 2>&1 || true
 systemctl restart limit-helper
-systemctl enable --now limit-xray >/dev/null 2>&1 || true
-systemctl restart limit-xray
-systemctl enable --now limit-viewer >/dev/null 2>&1 || true
-systemctl restart limit-viewer
+# Master switch: a fresh install starts PAUSED (OFF); an update keeps whatever
+# state it had (a paused install stays paused, a running one is restarted).
+if [ "$FRESH" -eq 1 ]; then
+    echo "[*] fresh install: limit master switch defaults to OFF"
+    echo "1" > "$BASE/.paused"
+    chmod 644 "$BASE/.paused" 2>/dev/null || true
+    systemctl disable limit-xray limit-viewer >/dev/null 2>&1 || true
+    systemctl stop limit-xray limit-viewer >/dev/null 2>&1 || true
+elif [ -f "$BASE/.paused" ]; then
+    echo "[*] limit is paused (.paused present): keeping services stopped"
+    systemctl stop limit-xray limit-viewer >/dev/null 2>&1 || true
+else
+    systemctl enable --now limit-xray >/dev/null 2>&1 || true
+    systemctl restart limit-xray
+    systemctl enable --now limit-viewer >/dev/null 2>&1 || true
+    systemctl restart limit-viewer
+fi
 sleep 2
 
 echo "[*] firewall: open limit panel port (public)"

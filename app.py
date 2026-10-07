@@ -690,7 +690,8 @@ PANEL_HTML = r"""
   <div class="panel" id="sys-status">
     <div class="panel-head">
       <span>系统状态</span>
-      <button type="button" class="btn-sm" onclick="restartXray()">重启 xray</button>
+      <button type="button" class="btn-sm" onclick="restartXray()">重启 vless</button>
+      <button type="button" class="btn-sm" onclick="restartHy2()">重启 hysteria2</button>
     </div>
     <div id="restart-msg" class="flash-msg" style="display:none;"></div>
     <div class="sv-grid">
@@ -1813,10 +1814,17 @@ async function pollStatus(){
   } catch (e) {}
 }
 async function restartXray(){
-  if (!confirm('确定重启 xray 服务？')) return;
+  if (!confirm('确定重启 vless（xray 进程）？')) return;
+  await doRestart('restart_xray', 'vless');
+}
+async function restartHy2(){
+  if (!confirm('确定重启 hysteria2 进程？')) return;
+  await doRestart('restart_hy2', 'hysteria2');
+}
+async function doRestart(ep, label){
   const box = $('restart-msg');
   try {
-    const r = await fetch(APIBASE + 'restart_xray', { method: 'POST' });
+    const r = await fetch(APIBASE + ep, { method: 'POST' });
     if (!r.ok) {
       if (box) { box.style.display = ''; box.className = 'flash-msg err'; box.textContent = '重启请求失败（状态 ' + r.status + '），请刷新页面后重试'; }
       return;
@@ -1824,9 +1832,9 @@ async function restartXray(){
     let d = {};
     const txt = await r.text();
     try { d = JSON.parse(txt); } catch (e) {}
-    if (box) { box.style.display = ''; box.className = 'flash-msg ' + (d.ok ? 'ok' : 'err'); box.textContent = d.ok ? '重启已触发，几秒后 xray 自动恢复' : ('重启失败：' + ((d && d.error) || '未知错误')); }
+    if (box) { box.style.display = ''; box.className = 'flash-msg ' + (d.ok ? 'ok' : 'err'); box.textContent = d.ok ? ('已重启 ' + label + '，几秒后自动恢复') : ('重启失败：' + ((d && (d.err || d.error)) || '未知错误')); }
   } catch (e) {
-    if (box) { box.style.display = ''; box.className = 'flash-msg err'; box.textContent = '连接中断：重启已触发，请稍后刷新确认 xray 状态'; }
+    if (box) { box.style.display = ''; box.className = 'flash-msg err'; box.textContent = '连接中断：重启已触发，请稍后刷新确认状态'; }
   }
 }
 setInterval(pollStatus, 5000);
@@ -3743,6 +3751,10 @@ def firewall_delete():
 def status():
     return jsonify(gather_status())
 
+def _hy2_units():
+    """主面板管理的 hysteria2 节点单元名（hysteria-node@<id>）。"""
+    return ["hysteria-node@%s" % n.get("id") for n in load_hy2_nodes() if n.get("id")]
+
 @panel.route("/restart_xray", methods=["POST"])
 @login_required
 def restart_xray():
@@ -3750,6 +3762,20 @@ def restart_xray():
         subprocess.Popen(["systemctl", "restart", XRAY_SERVICE_NAME],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return jsonify({"ok": True, "err": ""})
+    except Exception as e:
+        return jsonify({"ok": False, "err": str(e)})
+
+@panel.route("/restart_hy2", methods=["POST"])
+@login_required
+def restart_hy2():
+    try:
+        units = _hy2_units()
+        if not units:
+            return jsonify({"ok": False, "err": "没有 hysteria2 节点"})
+        for u in units:
+            subprocess.Popen(["systemctl", "restart", u],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return jsonify({"ok": True, "err": "", "units": units})
     except Exception as e:
         return jsonify({"ok": False, "err": str(e)})
 
@@ -4046,10 +4072,10 @@ def admin_limit_toggle():
                 os.remove(LIMIT_PAUSED_FILE)
             except Exception:
                 pass
-            subprocess.run(["systemctl", "start", "limit-xray"], timeout=25)
+            subprocess.run(["systemctl", "enable", "--now", "limit-xray"], timeout=25)
             for u in _limit_hy2_units():
                 subprocess.run(["systemctl", "start", u], timeout=25)
-            subprocess.run(["systemctl", "start", "limit-viewer"], timeout=25)
+            subprocess.run(["systemctl", "enable", "--now", "limit-viewer"], timeout=25)
             _limit_state_cache.update(t=0.0, on=True)
             return jsonify({"ok": True, "msg": "limit 服务已开启"})
         else:
@@ -4058,10 +4084,10 @@ def admin_limit_toggle():
                 open(LIMIT_PAUSED_FILE, "w").write("1")
             except Exception:
                 pass
-            subprocess.run(["systemctl", "stop", "limit-viewer"], timeout=25)
+            subprocess.run(["systemctl", "disable", "--now", "limit-viewer"], timeout=25)
             for u in _limit_hy2_units():
                 subprocess.run(["systemctl", "stop", u], timeout=25)
-            subprocess.run(["systemctl", "stop", "limit-xray"], timeout=25)
+            subprocess.run(["systemctl", "disable", "--now", "limit-xray"], timeout=25)
             _limit_state_cache.update(t=0.0, on=False)
             return jsonify({"ok": True, "msg": "limit 服务已暂停"})
     except Exception as e:
