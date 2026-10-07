@@ -71,7 +71,7 @@ if [ ! -x "/usr/local/bin/xray" ]; then
 fi
 XRAY_BIN="/usr/local/bin/xray"
 
-if [ ! -f /usr/local/etc/xray/config.json ]; then
+if [ "$FRESH" -eq 1 ] || [ ! -f /usr/local/etc/xray/config.json ]; then
 KEYS=$($XRAY_BIN x25519)
 REALITY_PRIVATE_KEY=$(echo "$KEYS" | grep -ioE "PrivateKey:[[:space:]]*[A-Za-z0-9+/_-]+" | awk '{print $2}')
 if [ -z "$REALITY_PRIVATE_KEY" ]; then
@@ -131,7 +131,7 @@ getent group hysteria >/dev/null 2>&1 || groupadd -r hysteria
 id hysteria >/dev/null 2>&1 || useradd -r -g hysteria -s /bin/false hysteria
 
 mkdir -p /etc/hysteria
-if [ ! -f /etc/hysteria/server.crt ]; then
+if [ "$FRESH" -eq 1 ] || [ ! -f /etc/hysteria/server.crt ]; then
     echo -e "${YELLOW}[*] Generating Hysteria2 self-signed certificate...${NC}"
     openssl req -x509 -nodes -newkey ec:<(openssl ecparam -name prime256v1) \
         -keyout /etc/hysteria/server.key \
@@ -146,7 +146,7 @@ mkdir -p /opt/xray-viewer
 mkdir -p /usr/local/etc/xray
 mkdir -p /etc/hysteria/conf.d
 
-if [ ! -f /usr/local/etc/xray/config.json ]; then
+if [ "$FRESH" -eq 1 ] || [ ! -f /usr/local/etc/xray/config.json ]; then
 echo -e "${YELLOW}[*] Generating Xray config...${NC}"
 cat > /usr/local/etc/xray/config.json << XRAYEOF
 {
@@ -204,7 +204,7 @@ cat > /usr/local/etc/xray/config.json << XRAYEOF
 XRAYEOF
 fi
 
-if [ ! -f /usr/local/etc/xray/hy2_nodes.json ]; then
+if [ "$FRESH" -eq 1 ] || [ ! -f /usr/local/etc/xray/hy2_nodes.json ]; then
 echo -e "${YELLOW}[*] Generating hy2_nodes.json (v3)...${NC}"
 cat > /usr/local/etc/xray/hy2_nodes.json << HYNODEEOF
 [
@@ -236,7 +236,7 @@ cat > /usr/local/etc/xray/hy2_nodes.json << HYNODEEOF
 HYNODEEOF
 fi
 
-if [ ! -f /usr/local/etc/xray/users.json ]; then
+if [ "$FRESH" -eq 1 ] || [ ! -f /usr/local/etc/xray/users.json ]; then
 echo -e "${YELLOW}[*] Generating users.json (unified user model)...${NC}"
 cat > /usr/local/etc/xray/users.json << USERSEOF
 {
@@ -258,7 +258,7 @@ cat > /usr/local/etc/xray/users.json << USERSEOF
 USERSEOF
 fi
 
-if [ ! -f /etc/hysteria/conf.d/hy2-443.yaml ]; then
+if [ "$FRESH" -eq 1 ] || [ ! -f /etc/hysteria/conf.d/hy2-443.yaml ]; then
 echo -e "${YELLOW}[*] Generating Hysteria2 node config...${NC}"
 cat > /etc/hysteria/conf.d/hy2-443.yaml << HYEOF
 listen: :443
