@@ -467,11 +467,14 @@ ufw --force enable >/dev/null 2>&1
 
 echo -e "${YELLOW}[*] Starting services...${NC}"
 systemctl daemon-reload
-systemctl enable --now hysteria-node@hy2-443 >/dev/null 2>&1
-systemctl enable --now xray >/dev/null 2>&1
-systemctl enable --now xray-viewer >/dev/null 2>&1
+systemctl enable --now hysteria-node@hy2-443 >/dev/null 2>&1 || true
+systemctl enable --now xray >/dev/null 2>&1 || true
+systemctl enable --now xray-viewer >/dev/null 2>&1 || true
 
-sleep 2
+for i in 1 2 3 4 5 6 7 8; do
+    if systemctl is-active --quiet xray && systemctl is-active --quiet xray-viewer && systemctl is-active --quiet hysteria-node@hy2-443; then break; fi
+    sleep 1
+done
 
 SERVER_IP=""
 for url in "https://api.ipify.org" "https://ipv4.icanhazip.com" "https://ifconfig.me/ip"; do
@@ -504,9 +507,9 @@ if [ "$FRESH" -eq 1 ]; then echo -e "${GREEN}  Deploy Complete!${NC}"; else echo
 echo -e "${GREEN}========================================${NC}"
 echo ""
 
-XRAY_STATUS=$(systemctl is-active xray)
-VIEWER_STATUS=$(systemctl is-active xray-viewer)
-HYSTERIA_STATUS=$(systemctl is-active hysteria-node@hy2-443)
+XRAY_STATUS=$(systemctl is-active xray || true)
+VIEWER_STATUS=$(systemctl is-active xray-viewer || true)
+HYSTERIA_STATUS=$(systemctl is-active hysteria-node@hy2-443 || true)
 
 echo -e "  Xray:             ${XRAY_STATUS}"
 echo -e "  Xray Viewer:      ${VIEWER_STATUS}"
