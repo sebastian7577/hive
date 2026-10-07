@@ -759,7 +759,7 @@ def vless_link(node):
         q.append(("security", "none"))
     qs = "&".join("%s=%s" % (k, _q(v)) for k, v in q)
     return "vless://%s@%s:%d?%s#%s" % (node["uuid"], SERVER_IP, int(node["port"]), qs,
-                                       _q(node.get("remark") or "vless"))
+                                       _q(node.get("remark") or ("vless%d" % int(node["port"]))))
 
 
 def hy2_link(node):
@@ -769,7 +769,7 @@ def hy2_link(node):
     q.append("insecure=1")
     return "hysteria2://%s@%s:%d/?%s#%s" % (
         _q(node.get("password", "")), SERVER_IP, int(node["port"]), "&".join(q),
-        _q(node.get("name") or "hy2"))
+        _q(node.get("name") or ("hy2%d" % int(node["port"]))))
 
 
 QRLIB = r'''/**
