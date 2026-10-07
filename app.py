@@ -672,11 +672,11 @@ LOGIN_HTML = """
     <form method="post">
       <div class="field">
         <label class="field-label">用户名</label>
-        <input type="text" name="username" autocomplete="off">
+        <input type="text" name="username" autocomplete="username">
       </div>
       <div class="field">
         <label class="field-label">密码</label>
-        <input type="password" name="password">
+        <input type="password" name="password" autocomplete="current-password">
       </div>
       <button class="btn-primary" type="submit">登 录</button>
     </form>

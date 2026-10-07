@@ -841,8 +841,8 @@ LOGIN_TPL = r"""<!doctype html><html><head><meta charset="utf-8">
 <h2>limit 登录</h2>
 {% if err %}<div class="login-err">{{ err }}</div>{% endif %}
 <form method="post" action="{{ P }}/login">
-<div class="field"><label class="field-label">用户名</label><input type="text" name="username" autocomplete="off"></div>
-<div class="field"><label class="field-label">密码</label><input type="password" name="password"></div>
+<div class="field"><label class="field-label">用户名</label><input type="text" name="username" autocomplete="username"></div>
+<div class="field"><label class="field-label">密码</label><input type="password" name="password" autocomplete="current-password"></div>
 <button class="btn-primary" type="submit">登 录</button>
 </form></div></div></body></html>"""
 
