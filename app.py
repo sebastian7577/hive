@@ -370,6 +370,7 @@ a { color: #2f6fed; text-decoration: none; }
   font-size: 12px; font-weight: 500; color: #2f6fed;
   background: #eaf1fe; padding: 2px 9px; border-radius: 10px;
 }
+.ph-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 .btn-sm {
   font-size: 12.5px; padding: 6px 14px; border-radius: 6px;
   background: #2f6fed; color: #fff; border: none; cursor: pointer; font-weight: 500;
@@ -690,8 +691,10 @@ PANEL_HTML = r"""
   <div class="panel" id="sys-status">
     <div class="panel-head">
       <span>系统状态</span>
-      <button type="button" class="btn-sm" onclick="restartXray()">重启 vless</button>
-      <button type="button" class="btn-sm" onclick="restartHy2()">重启 hysteria2</button>
+      <div class="ph-actions">
+        <button type="button" class="btn-sm" onclick="restartXray()">重启 vless</button>
+        <button type="button" class="btn-sm" onclick="restartHy2()">重启 hysteria2</button>
+      </div>
     </div>
     <div id="restart-msg" class="flash-msg" style="display:none;"></div>
     <div class="sv-grid">

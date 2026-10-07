@@ -25,6 +25,7 @@ General-purpose panels (3x-ui, Marzban) are **single-admin** or **shared-core mu
 - **Quota enforcement**: when a tenant hits the quota, all of its nodes are disabled automatically.
 - **Master switch**: pause/resume **all** limit services with one toggle.
 - **Node control**: every node (including the ones created at install) can be paused and deleted.
+- **Independent protocol processes**: VLESS (Xray) and Hysteria2 run as **separate systemd services** and are controlled independently — the status card can restart each on its own, so if one crashes the other keeps serving. Higher availability.
 - **HTTPS panels**: both panels serve TLS with an auto-generated self-signed certificate; the browser shows a one-time warning.
 - **Isolation first**: separate processes, systemd hardening (exposure score down to **1.9–4.0**), the tenant web process runs as a **non-root** user and performs privileged actions only through a **narrow root helper**.
 
