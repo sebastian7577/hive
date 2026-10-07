@@ -24,7 +24,7 @@ fi
 if [ "$1" = "uninstall" ]; then
     echo -e "${YELLOW}[*] Uninstalling Hive...${NC}"
     systemctl disable --now xray-viewer xray hysteria-node@hy2-443 limit-viewer limit-xray limit-helper >/dev/null 2>&1 || true
-    rm -f /etc/systemd/system/{xray,xray-viewer,hysteria-node@,limit-viewer,limit-xray,limit-hysteria@,limit-helper}.service
+    rm -f /etc/systemd/system/{xray,xray-viewer,hysteria-node@,limit-viewer,limit-xray,limit-xray@,limit-hysteria@,limit-helper}.service
     systemctl daemon-reload >/dev/null 2>&1 || true
     rm -rf /opt/xray-viewer /opt/limit
     rm -f /usr/local/bin/hive

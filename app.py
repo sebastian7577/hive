@@ -18,7 +18,7 @@ from flask import Flask, Blueprint, request, session, redirect, url_for, render_
 import traffic_store
 
 
-def atomic_write_json(path, data, keep=5, chmod=None):
+def atomic_write_json(path, data, keep=5, chmod=None, chown=None):
     tmp_path = path + ".tmp"
     with open(tmp_path, "w") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
@@ -44,11 +44,38 @@ def atomic_write_json(path, data, keep=5, chmod=None):
         except Exception:
             pass
     os.replace(tmp_path, path)
+    if chown is not None:
+        try:
+            os.chown(path, chown[0], chown[1])
+        except Exception:
+            pass
     if chmod is not None:
         try:
             os.chmod(path, chmod)
         except Exception:
             pass
+
+def _xrayconf_gid():
+    try:
+        import grp
+        return grp.getgrnam("xrayconf").gr_gid
+    except Exception:
+        return None
+
+def _xray_json_opts():
+    """(chmod, chown) for the xray JSON files: 0640 root:xrayconf when that group
+    exists (xray runs unprivileged in it), otherwise 0644 so xray can still read."""
+    gid = _xrayconf_gid()
+    if gid is not None:
+        return 0o640, (0, gid)
+    return 0o644, None
+
+SITES = ["www.amazon.com", "www.microsoft.com", "www.bing.com", "www.apple.com",
+         "www.cloudflare.com", "www.wikipedia.org", "www.samsung.com", "www.icloud.com"]
+
+def _rand_site():
+    """Random masquerade/SNI for new nodes so every install/node doesn't share one target."""
+    return secrets.choice(SITES)
 
 app = Flask(__name__)
 
@@ -295,6 +322,21 @@ def _limit_hy2_units():
         for line in (r.stdout or "").splitlines():
             u = line.split()[0].strip() if line.split() else ""
             if u.startswith("limit-hysteria@") and u.endswith(".service"):
+                out.append(u)
+        return out
+    except Exception:
+        return []
+
+def _limit_xray_units():
+    """当前已加载的 limit-xray@*.service 实例名列表（每租户一个）。"""
+    try:
+        r = subprocess.run(["systemctl", "list-units", "--all", "--type=service",
+                            "--no-legend", "--plain", "limit-xray@*"],
+                           capture_output=True, text=True, timeout=10)
+        out = []
+        for line in (r.stdout or "").splitlines():
+            u = line.split()[0].strip() if line.split() else ""
+            if u.startswith("limit-xray@") and u.endswith(".service"):
                 out.append(u)
         return out
     except Exception:
@@ -1432,7 +1474,7 @@ function openHy2Modal(){
   $('hy2-name').value = 'hy' + (HY2.length + 1);
   $('hy2-port').value = '';
   $('hy2-stats').value = '';
-  $('hy2-masq').value = 'https://www.amazon.com';
+  $('hy2-masq').value = 'https://' + REALITY_SITES[Math.floor(Math.random()*REALITY_SITES.length)];
   $('hy2-sni').value = '';
   $('hy2-masq-row').classList.add('hidden');
   $('hy2-stats-row').classList.add('hidden');
@@ -2044,7 +2086,8 @@ def load_users():
     return data
 
 def save_users(data):
-    atomic_write_json(USERS_PATH, data, chmod=0o644)
+    _c, _o = _xray_json_opts()
+    atomic_write_json(USERS_PATH, data, chmod=_c, chown=_o)
 
 def migrate_users():
     """首次运行：从现有 xray config + disabled_clients + hy2_nodes 构建 users.json。
@@ -2238,7 +2281,7 @@ def load_hy2_nodes():
         node.setdefault("enabled", True)
         node.setdefault("cert", node.get("cert") or TLS_CERT_FILE)
         node.setdefault("key", node.get("key") or TLS_KEY_FILE)
-        node.setdefault("masquerade", node.get("masquerade", node.get("dest", "https://www.amazon.com")))
+        node.setdefault("masquerade", node.get("masquerade", node.get("dest", "https://" + _rand_site())))
         stats = node.get("stats") or {}
         if not stats.get("listen"):
             try:
@@ -2256,7 +2299,8 @@ def load_hy2_nodes():
     return out
 
 def save_hy2_nodes(nodes):
-    atomic_write_json(HY2_NODES_PATH, nodes, chmod=0o644)
+    _c, _o = _xray_json_opts()
+    atomic_write_json(HY2_NODES_PATH, nodes, chmod=_c, chown=_o)
 
 def load_disabled_inbounds():
     if not os.path.exists(DISABLED_INBOUNDS_PATH):
@@ -2269,7 +2313,8 @@ def load_disabled_inbounds():
     return data if isinstance(data, list) else []
 
 def save_disabled_inbounds(items):
-    atomic_write_json(DISABLED_INBOUNDS_PATH, items, chmod=0o644)
+    _c, _o = _xray_json_opts()
+    atomic_write_json(DISABLED_INBOUNDS_PATH, items, chmod=_c, chown=_o)
 
 def _yaml_quote(s):
     return json.dumps(str(s), ensure_ascii=False)
@@ -2332,7 +2377,7 @@ def render_hy2_yaml(node):
     lines.append("masquerade:")
     lines.append("  type: proxy")
     lines.append("  proxy:")
-    lines.append("    url: %s" % _yaml_quote(node.get("masquerade", "https://www.amazon.com")))
+    lines.append("    url: %s" % _yaml_quote(node.get("masquerade", "https://" + _rand_site())))
     lines.append("    rewriteHost: true")
     lines.append("")
     lines.append("trafficStats:")
@@ -2615,7 +2660,7 @@ def _stream_settings(form):
     network = form.get("network", "tcp")
     if security == "reality" and network not in ("tcp", "grpc", "xhttp"):
         raise RuntimeError("REALITY 不支持 WebSocket，请改选 TCP 或 gRPC")
-    sni = (form.get("sni") or "www.amazon.com").strip()
+    sni = (form.get("sni") or _rand_site()).strip()
     dest = (form.get("dest") or "").strip() or (sni + ":443")
     stream = {"network": network, "security": "none"}
     if security == "reality":
@@ -2674,7 +2719,8 @@ def inbound_is_protected(port):
 # 0644 so the unprivileged xray process can read it.
 def write_config_and_restart(cfg):
     stamp_fwd_inbounds(cfg)
-    atomic_write_json(CONFIG_PATH, cfg, chmod=0o644)
+    _c, _o = _xray_json_opts()
+    atomic_write_json(CONFIG_PATH, cfg, chmod=_c, chown=_o)
 
     schedule_xray_restart()
     return True, None
@@ -3514,11 +3560,11 @@ def hy2node_add():
         sni = (request.form.get("sni") or "").strip()
         if masq and not sni:
             m = re.match(r"https?://([^/:]+)", masq)
-            sni = m.group(1) if m else "www.amazon.com"
+            sni = m.group(1) if m else _rand_site()
         if not masq:
-            masq = ("https://" + sni) if sni else "https://www.amazon.com"
+            masq = ("https://" + sni) if sni else ("https://" + _rand_site())
         if not sni:
-            sni = "www.amazon.com"
+            sni = _rand_site()
 
         stats_port = request.form.get("stats_port")
         if stats_port:
@@ -4075,7 +4121,8 @@ def admin_limit_toggle():
                 os.remove(LIMIT_PAUSED_FILE)
             except Exception:
                 pass
-            subprocess.run(["systemctl", "enable", "--now", "limit-xray"], timeout=25)
+            for u in _limit_xray_units():
+                subprocess.run(["systemctl", "enable", "--now", u], timeout=25)
             for u in _limit_hy2_units():
                 subprocess.run(["systemctl", "start", u], timeout=25)
             subprocess.run(["systemctl", "enable", "--now", "limit-viewer"], timeout=25)
@@ -4090,7 +4137,8 @@ def admin_limit_toggle():
             subprocess.run(["systemctl", "disable", "--now", "limit-viewer"], timeout=25)
             for u in _limit_hy2_units():
                 subprocess.run(["systemctl", "stop", u], timeout=25)
-            subprocess.run(["systemctl", "disable", "--now", "limit-xray"], timeout=25)
+            for u in _limit_xray_units():
+                subprocess.run(["systemctl", "disable", "--now", u], timeout=25)
             _limit_state_cache.update(t=0.0, on=False)
             return jsonify({"ok": True, "msg": "limit 服务已暂停"})
     except Exception as e:

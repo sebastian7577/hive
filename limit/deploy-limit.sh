@@ -14,6 +14,8 @@ DATA=$BASE/data
 UNIT_DIR=/etc/systemd/system
 FRESH=1
 [ -f "$BASE/app.py" ] && FRESH=0
+SITES=(www.amazon.com www.microsoft.com www.bing.com www.apple.com www.cloudflare.com www.wikipedia.org www.samsung.com www.icloud.com)
+MASQ="${HIVE_MASQ:-${SITES[$(( 0x$(openssl rand -hex 2) % ${#SITES[@]} ))]}}"
 
 echo "[*] ensure deps"
 command -v gunicorn >/dev/null 2>&1 || pip3 install flask gunicorn >/dev/null 2>&1 || true
@@ -56,7 +58,7 @@ echo "[*] hysteria self-signed cert"
 if [ ! -f "$BASE/hysteria/server.crt" ]; then
     openssl req -x509 -nodes -newkey ec:<(openssl ecparam -name prime256v1) \
         -keyout "$BASE/hysteria/server.key" -out "$BASE/hysteria/server.crt" \
-        -subj "/CN=www.amazon.com" -days 36500 >/dev/null 2>&1
+        -subj "/CN=${MASQ}" -days 36500 >/dev/null 2>&1
 fi
 chown limitpanel:hysteria "$BASE/hysteria/server.key" "$BASE/hysteria/server.crt" 2>/dev/null || true
 chmod 640 "$BASE/hysteria/server.key" "$BASE/hysteria/server.crt" 2>/dev/null || true
@@ -81,27 +83,9 @@ echo "[*] seed tenants.json"
 chown limitpanel:limitpanel "$DATA/tenants.json" 2>/dev/null || true
 chmod 660 "$DATA/tenants.json" 2>/dev/null || true
 
-echo "[*] initial limit-xray config (api only)"
-if [ ! -f "$BASE/xray/config.json" ]; then
-cat > "$BASE/xray/config.json" <<'XEOF'
-{
-  "log": {"loglevel": "warning", "access": "/dev/null"},
-  "inbounds": [
-    {"listen": "127.0.0.1", "port": 10185, "protocol": "dokodemo-door",
-     "settings": {"address": "127.0.0.1"}, "tag": "api"}
-  ],
-  "outbounds": [
-    {"protocol": "freedom", "tag": "direct"},
-    {"protocol": "blackhole", "tag": "block"},
-    {"protocol": "freedom", "tag": "api"}
-  ],
-  "stats": {},
-  "api": {"tag": "api", "services": ["StatsService"]},
-  "routing": {"rules": [{"type": "field", "inboundTag": ["api"], "outboundTag": "api"}]}
-}
-XEOF
-fi
-chmod 644 "$BASE/xray/config.json" 2>/dev/null || true
+echo "[*] migrate away from the shared limit-xray config"
+# each tenant now gets its own xray process + config (<tid>.json), written by the panel
+rm -f "$BASE/xray/config.json" 2>/dev/null || true
 
 echo "[*] panel port"
 if [ -f "$UNIT_DIR/limit-viewer.service" ]; then
@@ -120,9 +104,13 @@ chmod 644 "$BASE/panel_port"
 
 echo "[*] systemd units"
 sed "s/__PORT__/${PORT}/" "$SCRIPT_DIR/limit-viewer.service" > "$UNIT_DIR/limit-viewer.service"
-cp "$SCRIPT_DIR/limit-xray.service" "$UNIT_DIR/limit-xray.service"
+cp "$SCRIPT_DIR/limit-xray@.service" "$UNIT_DIR/limit-xray@.service"
 cp "$SCRIPT_DIR/limit-hysteria@.service" "$UNIT_DIR/limit-hysteria@.service"
 cp "$SCRIPT_DIR/limit-helper.service" "$UNIT_DIR/limit-helper.service"
+if [ -f "$UNIT_DIR/limit-xray.service" ]; then
+    systemctl disable --now limit-xray >/dev/null 2>&1 || true
+    rm -f "$UNIT_DIR/limit-xray.service"
+fi
 systemctl daemon-reload
 
 echo "[*] start services"
@@ -134,14 +122,12 @@ if [ "$FRESH" -eq 1 ]; then
     echo "[*] fresh install: limit master switch defaults to OFF"
     echo "1" > "$BASE/.paused"
     chmod 644 "$BASE/.paused" 2>/dev/null || true
-    systemctl disable limit-xray limit-viewer >/dev/null 2>&1 || true
-    systemctl stop limit-xray limit-viewer >/dev/null 2>&1 || true
+    systemctl disable limit-viewer >/dev/null 2>&1 || true
+    systemctl stop limit-viewer >/dev/null 2>&1 || true
 elif [ -f "$BASE/.paused" ]; then
     echo "[*] limit is paused (.paused present): keeping services stopped"
-    systemctl stop limit-xray limit-viewer >/dev/null 2>&1 || true
+    systemctl stop limit-viewer >/dev/null 2>&1 || true
 else
-    systemctl enable --now limit-xray >/dev/null 2>&1 || true
-    systemctl restart limit-xray
     systemctl enable --now limit-viewer >/dev/null 2>&1 || true
     systemctl restart limit-viewer
 fi

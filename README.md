@@ -25,7 +25,7 @@ General-purpose panels (3x-ui, Marzban) are **single-admin** or **shared-core mu
 - **Quota enforcement**: when a tenant hits the quota, all of its nodes are disabled automatically.
 - **Master switch**: pause/resume **all** limit services with one toggle.
 - **Node control**: every node (including the ones created at install) can be paused and deleted.
-- **Independent protocol processes**: VLESS (Xray) and Hysteria2 run as **separate systemd services** and are controlled independently — the status card can restart each on its own, so if one crashes the other keeps serving. Higher availability.
+- **Per-tenant isolated instances**: each tenant's Xray runs as its **own process** (`limit-xray@<tenant>`, own config + own stats API) and each Hysteria2 node as its own process too — one tenant (or protocol) failing does not take the others down. The main panel's status card can also restart the main VLESS and Hysteria2 processes independently.
 - **HTTPS panels**: both panels serve TLS with an auto-generated self-signed certificate; the browser shows a one-time warning.
 - **Isolation first**: separate processes, systemd hardening (exposure score down to **1.9–4.0**), the tenant web process runs as a **non-root** user and performs privileged actions only through a **narrow root helper**.
 
@@ -57,7 +57,10 @@ bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/inst
 - **Panels are HTTPS** (self-signed cert; `Secure` cookie + HSTS). Traffic is not sent in clear text.
 - **The firewall is never reset.** The installer only *adds* rules: it always keeps the SSH port(s) it can detect (from `sshd_config` and the live session), and opens `443` plus the panel port. An explicit `--reset-firewall` is required to wipe ufw.
 - **Hysteria2 is pinned and verified.** The binary is fetched from the official `apernet/hysteria` release and checked against a hard-coded SHA256.
-- **Tenant isolation**: each tenant runs its own Xray/Hysteria2 instance in a systemd sandbox; the tenant web process is non-root and can only touch its own units/ports through `limit-helper`.
+- **Tenant isolation**: each tenant runs its own **Xray process** (`limit-xray@<tenant>`) and its own Hysteria2 processes in systemd sandboxes; the tenant web process is non-root and can only touch its own units/ports through `limit-helper`.
+- **Sensitive files are not world-readable.** The main Xray config (REALITY private key, UUIDs) is `0640 root:xrayconf` and the main Hysteria2 certs `0640 root:hy2main`, so the tenant user cannot read the main node's secrets.
+- **The root helper only touches tenant ports.** `limit-helper` refuses any port outside the tenant ranges (`21000–49999`), so it cannot open or redirect `22`, `443` or the panel ports even if a tenant panel is compromised.
+- **Randomised masquerade.** The REALITY target / cert CN / Hysteria2 SNI is picked per install from a list of popular sites (override with `HIVE_MASQ=…`), so deployments don't all share one fingerprint.
 
 ## Architecture
 
@@ -78,7 +81,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/inst
                      │
         ┌────────────┴────────────┐
         ▼                         ▼
-   limit-xray (nobody)      limit-hysteria@<node> (hysteria)   ← per-tenant isolated instances
+   limit-xray@<tenant>      limit-hysteria@<node>   ← one process per tenant / per hy2 node
 ```
 
 ## Isolation at a glance

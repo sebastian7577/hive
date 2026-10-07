@@ -24,7 +24,7 @@
 - **配额**：租户达总配额后其全部节点自动停用。
 - **总开关**：一键暂停/恢复**全部** limit 服务。
 - **节点控制**：所有节点（含安装时自动创建的两个）都可以暂停和删除。
-- **协议进程独立**：VLESS（Xray）与 Hysteria2 跑在**各自独立的 systemd 服务**里、可分别控制（系统状态卡片可分别重启），一个挂了另一个照常工作，可靠性更高。
+- **每租户独立实例**：每个租户的 Xray 跑在**独立进程**里（`limit-xray@<租户>`，独立配置 + 独立统计 API），每个 Hysteria2 节点也是独立进程 —— 一个租户（或某个协议）挂了不会拖垮其它。主面板系统状态卡片也可分别重启主 VLESS 与 Hysteria2 进程。
 - **HTTPS 面板**：两个面板都用自动生成的自签证书提供 TLS；浏览器会提示一次证书不受信任。
 - **隔离优先**：独立进程、systemd 强化（暴露分低至 **1.9–4.0**）、租户 Web 进程以**非 root** 运行，特权动作只经**窄接口 root helper**。
 
@@ -56,7 +56,10 @@ bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/inst
 - **面板走 HTTPS**（自签证书；`Secure` cookie + HSTS），口令不再明文传输。
 - **不重置防火墙。** 安装脚本只**追加**规则：始终保留它探测到的 SSH 端口（来自 `sshd_config` 和当前会话），并放行 `443` 与面板端口；只有显式传 `--reset-firewall` 才会清空 ufw。
 - **Hysteria2 固定版本并校验。** 二进制取自官方 `apernet/hysteria`，并按脚本内置的 SHA256 校验。
-- **租户隔离**：每个租户跑在独立的 systemd 沙箱里的 Xray/Hysteria2 实例；租户 Web 进程非 root，只能通过 `limit-helper` 操作自己的单元/端口。
+- **租户隔离**：每个租户跑在自己独立的 **Xray 进程**（`limit-xray@<租户>`）与独立的 Hysteria2 进程里，均在 systemd 沙箱中；租户 Web 进程非 root，只能通过 `limit-helper` 操作自己的单元/端口。
+- **敏感文件不再全局可读。** 主 Xray 配置（含 REALITY 私钥、UUID）为 `0640 root:xrayconf`、主 Hysteria2 证书为 `0640 root:hy2main`，租户用户读不到主节点密钥。
+- **root helper 只碰租户端口。** `limit-helper` 拒绝租户段（`21000–49999`）以外的任何端口，即使租户面板被攻破也无法放行/重定向 `22`、`443` 或面板端口。
+- **伪装随机化。** REALITY 目标 / 证书 CN / Hysteria2 SNI 每次安装从一份常见站点列表里随机选取（可用 `HIVE_MASQ=…` 覆盖），避免所有部署同一特征。
 
 ## 架构
 
@@ -77,7 +80,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/inst
                       │
         ┌─────────────┴─────────────┐
         ▼                           ▼
-   limit-xray (nobody)      limit-hysteria@<节点> (hysteria)   ← 每租户独立实例
+   limit-xray@<租户>        limit-hysteria@<节点>   ← 每租户 / 每 hy2 节点各一个进程
 ```
 
 ## 隔离一览

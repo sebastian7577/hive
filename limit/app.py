@@ -22,7 +22,8 @@ BASE = "/opt/limit"
 DATA_DIR = BASE + "/data"
 TENANTS_PATH = DATA_DIR + "/tenants.json"
 LOCK_PATH = DATA_DIR + "/.tenants.lock"
-XRAY_CONFIG = BASE + "/xray/config.json"
+XRAY_DIR = BASE + "/xray"
+XRAY_CONFIG = BASE + "/xray/config.json"      # legacy shared config (migrated away)
 XRAY_SIG = BASE + "/xray/.applied.sig"
 HY2_DIR = BASE + "/hysteria/conf.d"
 HY2_CRT = BASE + "/hysteria/server.crt"
@@ -31,14 +32,20 @@ SECRET_FILE = BASE + "/secret_key"
 LOGIN_LOCK_PATH = DATA_DIR + "/login_lock.json"
 PANEL_PORT_FILE = BASE + "/panel_port"
 SERVER_IP_FILE = BASE + "/server_ip"
-XRAY_API = "127.0.0.1:10185"
-XRAY_SVC = "limit-xray"
+XRAY_API_BASE = 10185
+XRAY_API_MAX = 10999
+XRAY_UNIT = "limit-xray@%s"                   # one xray process per tenant
+XRAY_SVC = "limit-xray"                       # legacy shared unit (migrated away)
 HY2_UNIT = "limit-hysteria@%s"
 UFW_TRACK = DATA_DIR + "/ufw_ports.json"
 HY2_USER = "u"
 HY2_SNI = "www.amazon.com"
 SITES = ["www.amazon.com", "www.microsoft.com", "www.bing.com", "www.apple.com",
          "www.cloudflare.com", "www.wikipedia.org", "www.samsung.com", "www.icloud.com"]
+
+def _rand_site():
+    """Random masquerade/SNI for new nodes so tenants don't all share one target."""
+    return secrets.choice(SITES)
 
 VLESS_RANGE = (21000, 21999)
 FWD_RANGE = (22000, 29999)
@@ -214,7 +221,7 @@ def _migrate(ts):
                 n.setdefault(k, 0)
         for h in t.get("hy2", []):
             h.setdefault("name", "hy2%d" % h.get("port", 0))
-            h.setdefault("sni", HY2_SNI)
+            h.setdefault("sni", _rand_site())
             h.setdefault("masquerade", "https://" + h.get("sni", HY2_SNI))
             if "clients" in h:
                 cl = h.pop("clients") or []
@@ -405,7 +412,7 @@ def _vless_flow(node):
 
 def _stream(node):
     sec = node.get("security", "none"); net = node.get("network", "tcp")
-    sni = node.get("sni", "") or HY2_SNI
+    sni = node.get("sni", "") or _rand_site()
     st = {"network": net, "security": "none"}
     if sec == "reality":
         st["security"] = "reality"
@@ -423,32 +430,30 @@ def _stream(node):
     return st
 
 
-def build_xray_config(ts):
+def build_tenant_config(t, api_port):
+    """Xray config for ONE tenant: its own process, own inbounds, own stats API."""
     inbounds = []
-    for t in ts:
-        if t.get("exhausted") or not t.get("enabled", True):
+    for n in t.get("vless", []):
+        if not _on(n):
             continue
-        for n in t.get("vless", []):
-            if not _on(n):
-                continue
-            cl = {"id": n["uuid"], "email": _vless_email(t["id"], n["port"])}
-            flow = _vless_flow(n)
-            if flow:
-                cl["flow"] = flow
-            inbounds.append({"listen": "0.0.0.0", "port": int(n["port"]), "protocol": "vless",
-                             "settings": {"clients": [cl], "decryption": "none"},
-                             "streamSettings": _stream(n),
-                             "sniffing": {"enabled": True, "destOverride": ["http", "tls"]},
-                             "tag": _vless_tag(t["id"], n["port"])})
-        for f in t.get("fwd", []):
-            if not _on(f):
-                continue
-            for proto in ("tcp", "udp"):
-                if (proto == "tcp" and f.get("tcp")) or (proto == "udp" and f.get("udp")):
-                    inbounds.append({"listen": "0.0.0.0", "port": int(f["listen_port"]), "protocol": "dokodemo-door",
-                                     "settings": {"address": f["target_ip"], "port": int(f["target_port"]), "network": proto},
-                                     "tag": _fwd_tag(t["id"], f["id"], proto)})
-    inbounds.append({"listen": "127.0.0.1", "port": int(XRAY_API.split(":")[1]),
+        cl = {"id": n["uuid"], "email": _vless_email(t["id"], n["port"])}
+        flow = _vless_flow(n)
+        if flow:
+            cl["flow"] = flow
+        inbounds.append({"listen": "0.0.0.0", "port": int(n["port"]), "protocol": "vless",
+                         "settings": {"clients": [cl], "decryption": "none"},
+                         "streamSettings": _stream(n),
+                         "sniffing": {"enabled": True, "destOverride": ["http", "tls"]},
+                         "tag": _vless_tag(t["id"], n["port"])})
+    for f in t.get("fwd", []):
+        if not _on(f):
+            continue
+        for proto in ("tcp", "udp"):
+            if (proto == "tcp" and f.get("tcp")) or (proto == "udp" and f.get("udp")):
+                inbounds.append({"listen": "0.0.0.0", "port": int(f["listen_port"]), "protocol": "dokodemo-door",
+                                 "settings": {"address": f["target_ip"], "port": int(f["target_port"]), "network": proto},
+                                 "tag": _fwd_tag(t["id"], f["id"], proto)})
+    inbounds.append({"listen": "127.0.0.1", "port": int(api_port),
                      "protocol": "dokodemo-door", "settings": {"address": "127.0.0.1"}, "tag": "api"})
     return {
         "log": {"loglevel": "warning", "access": "/dev/null"},
@@ -469,7 +474,7 @@ def _sig(ts):
     rel = []
     for t in ts:
         rel.append({"id": t["id"], "e": t.get("enabled", True), "x": t.get("exhausted", False),
-                    "pp": t.get("panel_port"),
+                    "pp": t.get("panel_port"), "ap": t.get("api_port"),
                     "v": [[n["port"], _on(n), n.get("security"), n.get("network"), n.get("sni"),
                            n.get("reality_private"), n.get("short_id"), n.get("uuid")]
                           for n in t.get("vless", [])],
@@ -491,26 +496,61 @@ def _hy2_yaml(port, password, listen, secret, masq):
     return "\n".join(lines) + "\n"
 
 
-# Reconcile every tenant's desired state into reality: rewrite the shared xray
-# config, (re)write each hy2 yaml, start/stop the per-tenant units through the
-# helper, and open the needed ufw ports. Called whenever the tenant signature
-# changes (see _collect_once).
+def _xray_conf(tid):
+    return os.path.join(XRAY_DIR, "%s.json" % tid)
+
+
+# Reconcile every tenant's desired state into reality: one xray process per
+# tenant (its own config + own stats API), the per-node hy2 yamls, and the ufw
+# ports. Called whenever the tenant signature changes (see _collect_once).
 def apply_all(ts, do_redir=True):
-    cfg = json.dumps(build_xray_config(ts), indent=2)
-    os.makedirs(os.path.dirname(XRAY_CONFIG), exist_ok=True)
-    try:
-        cur = open(XRAY_CONFIG).read()
-    except Exception:
-        cur = None
-    if cur != cfg:
-        tmp = XRAY_CONFIG + ".tmp"
-        open(tmp, "w").write(cfg)
+    os.makedirs(XRAY_DIR, exist_ok=True)
+    live = {}
+    for t in ts:
+        if t.get("exhausted") or not t.get("enabled", True):
+            continue
+        api_port = int(t.get("api_port") or 0)
+        if not api_port:
+            continue
+        live[t["id"]] = json.dumps(build_tenant_config(t, api_port), indent=2)
+    for tid, cfg in live.items():
+        path = _xray_conf(tid)
         try:
-            os.chmod(tmp, 0o644)
+            cur = open(path).read()
+        except Exception:
+            cur = None
+        changed = (cur != cfg)
+        if changed:
+            tmp = path + ".tmp"
+            open(tmp, "w").write(cfg)
+            try:
+                os.chmod(tmp, 0o640)
+            except Exception:
+                pass
+            os.replace(tmp, path)
+        unit = XRAY_UNIT % tid
+        _priv(op="systemctl", action="enable", unit=unit)
+        active = _run(["systemctl", "is-active", "--quiet", unit]).returncode == 0
+        if not active:
+            _priv(op="systemctl", action="start", unit=unit)
+        elif changed:
+            _priv(op="systemctl", action="restart", unit=unit)
+    for fn in os.listdir(XRAY_DIR):
+        if fn.endswith(".json") and fn[:-5] not in live:
+            tid = fn[:-5]
+            if tid != "config":
+                _priv(op="systemctl", action="disable", unit=XRAY_UNIT % tid)
+            try:
+                os.remove(os.path.join(XRAY_DIR, fn))
+            except Exception:
+                pass
+    if os.path.exists(XRAY_CONFIG):
+        # migrate away from the old shared limit-xray instance
+        _priv(op="systemctl", action="disable", unit=XRAY_SVC)
+        try:
+            os.remove(XRAY_CONFIG)
         except Exception:
             pass
-        os.replace(tmp, XRAY_CONFIG)
-        _priv(op="systemctl", action="restart", unit=XRAY_SVC)
 
     os.makedirs(HY2_DIR, exist_ok=True)
     want = {}
@@ -576,8 +616,15 @@ def apply_all(ts, do_redir=True):
 
 def _collect_once():
     ts0 = load_tenants()
-    xuser = traffic_store.get_xray_user_map(XRAY_API)
-    xin = traffic_store.get_xray_inbound_map(XRAY_API)
+    # each tenant has its own xray process + stats API, so query them one by one
+    xuser = {}
+    xin = {}
+    for t in ts0:
+        ap = t.get("api_port")
+        if ap:
+            srv = "127.0.0.1:%d" % int(ap)
+            xuser.update(traffic_store.get_xray_user_map(srv))
+            xin.update(traffic_store.get_xray_inbound_map(srv))
     hy2nodes = [{"id": _hy2_nid(t["id"], h["id"]), "listen": h.get("listen", "127.0.0.1:0"),
                  "secret": h.get("secret", "")} for t in ts0 for h in t.get("hy2", [])]
     hy2u = traffic_store.get_hy2_users(hy2nodes)
@@ -586,6 +633,7 @@ def _collect_once():
     ts = load_tenants()
     dirty = changed = False
     used_pp = {int(t.get("panel_port", 0)) for t in ts if t.get("panel_port")}
+    used_api = {int(t.get("api_port", 0)) for t in ts if t.get("api_port")}
     _bp = int(_base_port() or 0)
     for t in ts:
         if not t.get("panel_port"):
@@ -599,6 +647,11 @@ def _collect_once():
                     continue
                 t["panel_port"] = cand; used_pp.add(cand); changed = True
                 break
+        if not t.get("api_port"):
+            for p in range(XRAY_API_BASE, XRAY_API_MAX + 1):
+                if p not in used_api:
+                    t["api_port"] = p; used_api.add(p); changed = True
+                    break
     for t in ts:
         tup = int(t.get("retired_up", 0)); tdown = int(t.get("retired_down", 0))
         for n in t.get("vless", []):
@@ -1235,7 +1288,7 @@ def add_vless(pt):
     except Exception as e:
         _set_flash(str(e), False); return redirect("/%s/" % pt)
     rm = (request.form.get("remark") or "").strip() or ("vless%d" % port)
-    sni = (request.form.get("sni") or "").strip() or HY2_SNI
+    sni = (request.form.get("sni") or "").strip() or _rand_site()
     security = "reality"
     priv = pub = ""
     try:
@@ -1266,7 +1319,7 @@ def add_hy2(pt):
     except Exception as e:
         _set_flash(str(e), False); return redirect("/%s/" % pt)
     name = (request.form.get("name") or "").strip() or ("hy2%d" % port)
-    sni = (request.form.get("sni") or "").strip() or HY2_SNI
+    sni = (request.form.get("sni") or "").strip() or _rand_site()
     used_stats = set()
     for t2 in ts:
         for h2 in t2.get("hy2", []):

@@ -13,7 +13,18 @@ import json, os, re, socket, subprocess, threading
 SOCK = "/run/limit-helper.sock"
 SERVER_IP_FILE = "/opt/limit/server_ip"
 
-UNIT_RE = re.compile(r"^limit-(xray|hysteria@[A-Za-z0-9._@-]+)(\.service)?$")
+UNIT_RE = re.compile(r"^limit-(xray@[A-Za-z0-9._-]+|xray|hysteria@[A-Za-z0-9._@-]+)(\.service)?$")
+
+# Only ports that belong to tenants may be touched through the helper, and only
+# in the ranges the panel hands out. Everything else (22, 443, the panel ports,
+# system ports, ...) is refused even if the tenant web app is compromised.
+TENANT_RANGES = ((21000, 21999), (22000, 29999), (30000, 30999), (40000, 49999))
+TENANT_PANEL_RANGE = (40000, 49999)
+BASE_RANGE = (50000, 60000)
+
+
+def _port_owned(port, ranges):
+    return any(lo <= port <= hi for lo, hi in ranges)
 
 
 def _run(args, timeout=30):
@@ -69,8 +80,8 @@ def handle(req):
         action = req.get("action"); port = int(req.get("port")); proto = req.get("proto", "tcp")
         if action not in ("allow", "delete"):
             raise ValueError("bad action")
-        if not (1 <= port <= 65535):
-            raise ValueError("bad port")
+        if not (1 <= port <= 65535) or not _port_owned(port, TENANT_RANGES):
+            raise ValueError("port %s not owned by a tenant" % port)
         if proto not in ("tcp", "udp"):
             raise ValueError("bad proto")
         spec = "%d/%s" % (port, proto)
@@ -80,11 +91,11 @@ def handle(req):
     if op == "iptables_redir":
         base = int(req.get("base"))
         ports = [int(p) for p in (req.get("ports") or [])]
-        if not (1 <= base <= 65535):
+        if not (1 <= base <= 65535) or not _port_owned(base, (BASE_RANGE,)):
             raise ValueError("bad base")
         for p in ports:
-            if not (1 <= p <= 65535):
-                raise ValueError("bad port")
+            if not (1 <= p <= 65535) or not _port_owned(p, (TENANT_PANEL_RANGE,)):
+                raise ValueError("port %d not a tenant panel port" % p)
         return _iptables_redir(base, ports)
     raise ValueError("unknown op")
 

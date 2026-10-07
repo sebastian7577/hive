@@ -32,6 +32,11 @@ gen_port() {
     echo $(( lo + r % (hi - lo + 1) ))
 }
 
+# Masquerade / REALITY target: pick a random popular site per install so every
+# deployment doesn't share the same fingerprint. Override with HIVE_MASQ=example.com
+SITES=(www.amazon.com www.microsoft.com www.bing.com www.apple.com www.cloudflare.com www.wikipedia.org www.samsung.com www.icloud.com)
+MASQ="${HIVE_MASQ:-${SITES[$(gen_port 0 $(( ${#SITES[@]} - 1 )))]}}"
+
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}  Xray Viewer + Hysteria2 Deploy${NC}"
 echo -e "${GREEN}========================================${NC}"
@@ -169,6 +174,9 @@ fi
 
 getent group hysteria >/dev/null 2>&1 || groupadd -r hysteria
 id hysteria >/dev/null 2>&1 || useradd -r -g hysteria -s /bin/false hysteria
+getent group xrayconf >/dev/null 2>&1 || groupadd -r xrayconf
+getent group hy2main >/dev/null 2>&1 || groupadd -r hy2main
+usermod -aG hy2main hysteria 2>/dev/null || true
 
 mkdir -p /etc/hysteria
 if [ "$FRESH" -eq 1 ] || [ ! -f /etc/hysteria/server.crt ]; then
@@ -176,7 +184,7 @@ if [ "$FRESH" -eq 1 ] || [ ! -f /etc/hysteria/server.crt ]; then
     openssl req -x509 -nodes -newkey ec:<(openssl ecparam -name prime256v1) \
         -keyout /etc/hysteria/server.key \
         -out /etc/hysteria/server.crt \
-        -subj "/CN=www.amazon.com" -days 36500 >/dev/null 2>&1
+        -subj "/CN=${MASQ}" -days 36500 >/dev/null 2>&1
 fi
 
 HY2_STATS_PORT=9999
@@ -211,9 +219,9 @@ cat > /usr/local/etc/xray/config.json << XRAYEOF
         "security": "reality",
         "realitySettings": {
           "show": false,
-          "dest": "www.amazon.com:443",
+          "dest": "${MASQ}:443",
           "xver": 0,
-          "serverNames": ["www.amazon.com"],
+          "serverNames": ["${MASQ}"],
           "privateKey": "${REALITY_PRIVATE_KEY}",
           "shortIds": ["${SHORT_ID}"]
         }
@@ -254,13 +262,13 @@ cat > /usr/local/etc/xray/hy2_nodes.json << HYNODEEOF
     "port": 443,
     "protocol": "Hysteria2",
     "network": "UDP",
-    "sni": "www.amazon.com",
-    "dest": "www.amazon.com:443",
+    "sni": "${MASQ}",
+    "dest": "${MASQ}:443",
     "auth": "信任自签证书",
     "enabled": true,
     "cert": "/etc/hysteria/server.crt",
     "key": "/etc/hysteria/server.key",
-    "masquerade": "https://www.amazon.com",
+    "masquerade": "https://${MASQ}",
     "stats": {
       "listen": "127.0.0.1:${HY2_STATS_PORT}",
       "secret": "${HY2_STATS_SECRET}"
@@ -315,7 +323,7 @@ auth:
 masquerade:
   type: proxy
   proxy:
-    url: https://www.amazon.com
+    url: https://${MASQ}
     rewriteHost: true
 
 trafficStats:
@@ -324,14 +332,18 @@ trafficStats:
 HYEOF
 fi
 
-chown -R hysteria:hysteria /etc/hysteria
+chown -R root:hy2main /etc/hysteria
+chmod 750 /etc/hysteria /etc/hysteria/conf.d 2>/dev/null || true
+chmod 640 /etc/hysteria/server.key /etc/hysteria/server.crt /etc/hysteria/conf.d/*.yaml 2>/dev/null || true
 
 [ -f /usr/local/etc/xray/disabled_clients.json ] || echo "[]" > /usr/local/etc/xray/disabled_clients.json
 [ -f /usr/local/etc/xray/disabled_inbounds.json ] || echo "[]" > /usr/local/etc/xray/disabled_inbounds.json
 [ -f /usr/local/etc/xray/traffic_totals.json ] || echo "{}" > /usr/local/etc/xray/traffic_totals.json
 [ -f /usr/local/etc/xray/fwd.json ] || echo "[]" > /usr/local/etc/xray/fwd.json
-# xray runs as an unprivileged user, so its config must be readable by it
-chmod 644 /usr/local/etc/xray/*.json 2>/dev/null || true
+# xray runs as an unprivileged user; keep the config (Reality private key, UUIDs)
+# readable only by root and the xrayconf group that xray itself belongs to.
+chown root:xrayconf /usr/local/etc/xray/*.json 2>/dev/null || true
+chmod 640 /usr/local/etc/xray/*.json 2>/dev/null || true
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
@@ -385,6 +397,7 @@ StartLimitIntervalSec=0
 [Service]
 User=nobody
 Group=nogroup
+SupplementaryGroups=xrayconf
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 NoNewPrivileges=true
@@ -477,6 +490,7 @@ Type=simple
 ExecStart=/usr/local/bin/hysteria server --config /etc/hysteria/conf.d/%i.yaml
 User=hysteria
 Group=hysteria
+SupplementaryGroups=hy2main
 Environment=HYSTERIA_LOG_LEVEL=warn
 Environment=GOGC=50
 Restart=on-failure
@@ -594,17 +608,17 @@ if [ "$FRESH" -eq 1 ]; then
 echo -e "${GREEN}--- Xray VLESS+Reality 节点 (443) ---${NC}"
 echo -e "  Server:     ${SERVER_IP}"
 echo -e "  Port:       443"
-echo -e "  Network:    tcp / TLS: reality / SNI: www.amazon.com / ShortID: ${SHORT_ID}"
+echo -e "  Network:    tcp / TLS: reality / SNI: ${MASQ} / ShortID: ${SHORT_ID}"
 echo -e "  PublicKey:  ${REALITY_PUBLIC_KEY}"
 echo ""
 echo -e "  [admin]  (vless + hy2 双协议，vless uuid == hy2 密码)"
 echo -e "    UUID:   ${UUID_ADMIN}"
-echo -e "    Link:   ${YELLOW}vless://${UUID_ADMIN}@${SERVER_IP}:443?encryption=none&flow=xtls-rprx-vision&network=tcp&security=reality&sni=www.amazon.com&fp=chrome&pbk=${REALITY_PUBLIC_KEY}&sid=${SHORT_ID}#admin_vless${NC}"
+echo -e "    Link:   ${YELLOW}vless://${UUID_ADMIN}@${SERVER_IP}:443?encryption=none&flow=xtls-rprx-vision&network=tcp&security=reality&sni=${MASQ}&fp=chrome&pbk=${REALITY_PUBLIC_KEY}&sid=${SHORT_ID}#admin_vless${NC}"
 echo -e "    hy2 密码(uuid): ${UUID_ADMIN}"
 echo ""
 
 echo -e "${GREEN}--- Hysteria2 节点 (443) ---${NC}"
-echo -e "  Server:     ${SERVER_IP} / Port: 443 (UDP) / SNI: www.amazon.com (客户端信任自签证书)"
+echo -e "  Server:     ${SERVER_IP} / Port: 443 (UDP) / SNI: ${MASQ} (客户端信任自签证书)"
 echo -e "  [admin]  用户名: admin  密码: ${UUID_ADMIN}"
 echo ""
 else
