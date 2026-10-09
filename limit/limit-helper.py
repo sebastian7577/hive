@@ -12,6 +12,7 @@ import json, os, re, socket, subprocess, threading
 
 SOCK = "/run/limit-helper.sock"
 SERVER_IP_FILE = "/opt/limit/server_ip"
+PANEL_PORT_FILE = "/opt/limit/panel_port"
 
 UNIT_RE = re.compile(r"^limit-(xray@[A-Za-z0-9._-]+|xray|hysteria@[A-Za-z0-9._@-]+)(\.service)?$")
 
@@ -40,6 +41,15 @@ def _server_ip():
         return open(SERVER_IP_FILE).read().strip()
     except Exception:
         return ""
+
+
+def _base_port():
+    """The panel's actual base port (so redirects work even if it's outside the
+    default 50000-60000 range, e.g. a port restored from an older install)."""
+    try:
+        return int(open(PANEL_PORT_FILE).read().strip())
+    except Exception:
+        return 0
 
 
 def _iptables_redir(base, ports):
@@ -91,7 +101,8 @@ def handle(req):
     if op == "iptables_redir":
         base = int(req.get("base"))
         ports = [int(p) for p in (req.get("ports") or [])]
-        if not (1 <= base <= 65535) or not _port_owned(base, (BASE_RANGE,)):
+        want = _base_port()
+        if not (1 <= base <= 65535) or (want and base != want) or (not want and not _port_owned(base, (BASE_RANGE,))):
             raise ValueError("bad base")
         for p in ports:
             if not (1 <= p <= 65535) or not _port_owned(p, (TENANT_PANEL_RANGE,)):
