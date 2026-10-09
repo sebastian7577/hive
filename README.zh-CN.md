@@ -58,7 +58,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/inst
 - **Hysteria2 固定版本并校验。** 二进制取自官方 `apernet/hysteria`，并按脚本内置的 SHA256 校验。
 - **租户隔离**：每个租户跑在自己独立的 **Xray 进程**（`limit-xray@<租户>`）与独立的 Hysteria2 进程里，均在 systemd 沙箱中；租户 Web 进程非 root，只能通过 `limit-helper` 操作自己的单元/端口。
 - **敏感文件不再全局可读。** 主 Xray 配置（含 REALITY 私钥、UUID）为 `0640 root:xrayconf`、主 Hysteria2 证书为 `0640 root:hy2main`，租户用户读不到主节点密钥。
-- **root helper 只碰租户端口。** `limit-helper` 拒绝租户段（`21000–49999`）以外的任何端口，即使租户面板被攻破也无法放行/重定向 `22`、`443` 或面板端口。
+- **root helper 只碰租户端口。** `limit-helper` 拒绝放行/重定向租户段（`21000–49999`）以外的端口（唯一例外是它自己的 base 端口，仅作重定向目标），即使租户面板被攻破也无法碰 `22`、`443` 或面板端口。
 - **伪装随机化。** REALITY 目标 / 证书 CN / Hysteria2 SNI 每次安装从一份常见站点列表里随机选取（可用 `HIVE_MASQ=…` 覆盖），避免所有部署同一特征。
 
 ## 架构
@@ -82,6 +82,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/inst
         ▼                           ▼
    limit-xray@<租户>        limit-hysteria@<节点>   ← 每租户 / 每 hy2 节点各一个进程
 ```
+
+每个租户的**随机端口不单独在防火墙放行**；由 iptables `REDIRECT`（`nat/PREROUTING` + `nat/OUTPUT`）把它转到共享的 base 端口，所以**只需放行 base 端口**。
 
 ## 隔离一览
 

@@ -12,7 +12,7 @@
 
 ## Why Hive
 
-General-purpose panels (3x-ui, Marzban) are **single-admin** or **shared-core multi-user**: every admin/client lives inside one Xray process and one config. Hive is built for the **reseller / multi-tenant** use case: split one server into **many tenants that cannot see each other**, each with its **own isolated panel, own nodes, and a total traffic quota**.
+General-purpose panels (3x-ui, Marzban) are **single-admin** or **shared-core multi-user**: every admin/client lives inside one Xray process and one config. Hive is built for the **reseller / multi-tenant** use case: split one server into **many tenants that cannot see each other**, each with its **own panel URL, its own proxy processes, and a total traffic quota**.
 
 - **3x-ui** — single admin; "multi-node" means managing *other* 3x-ui instances.
 - **Marzban** — shared Xray core, user-centric, multi-admin (WIP).
@@ -59,7 +59,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/inst
 - **Hysteria2 is pinned and verified.** The binary is fetched from the official `apernet/hysteria` release and checked against a hard-coded SHA256.
 - **Tenant isolation**: each tenant runs its own **Xray process** (`limit-xray@<tenant>`) and its own Hysteria2 processes in systemd sandboxes; the tenant web process is non-root and can only touch its own units/ports through `limit-helper`.
 - **Sensitive files are not world-readable.** The main Xray config (REALITY private key, UUIDs) is `0640 root:xrayconf` and the main Hysteria2 certs `0640 root:hy2main`, so the tenant user cannot read the main node's secrets.
-- **The root helper only touches tenant ports.** `limit-helper` refuses any port outside the tenant ranges (`21000–49999`), so it cannot open or redirect `22`, `443` or the panel ports even if a tenant panel is compromised.
+- **The root helper only touches tenant ports.** `limit-helper` refuses to open or redirect any port outside the tenant ranges (`21000–49999`) — the only exception is the panel's own base port, used purely as the redirect target — so it cannot touch `22`, `443` or the panel ports even if a tenant panel is compromised.
 - **Randomised masquerade.** The REALITY target / cert CN / Hysteria2 SNI is picked per install from a list of popular sites (override with `HIVE_MASQ=…`), so deployments don't all share one fingerprint.
 
 ## Architecture
@@ -83,6 +83,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/inst
         ▼                         ▼
    limit-xray@<tenant>      limit-hysteria@<node>   ← one process per tenant / per hy2 node
 ```
+
+Each tenant's **random port** is not opened in the firewall; an iptables `REDIRECT` (in `nat/PREROUTING` + `nat/OUTPUT`) maps it to the shared base port, so only the **base port** needs a firewall rule.
 
 ## Isolation at a glance
 
