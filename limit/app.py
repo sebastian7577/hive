@@ -306,11 +306,19 @@ def _lk_clear(tid, ip):
     d = _lk_load(); d.pop("%s|%s" % (tid, ip), None); _lk_save(d)
 
 
-def _used_ports(ts):
+def _used_tcp(ts):
     u = set()
     for t in ts:
         for n in t.get("vless", []):
             u.add(int(n["port"]))
+        for f in t.get("fwd", []):
+            u.add(int(f["listen_port"]))
+    return u
+
+
+def _used_udp(ts):
+    u = set()
+    for t in ts:
         for f in t.get("fwd", []):
             u.add(int(f["listen_port"]))
         for h in t.get("hy2", []):
@@ -318,8 +326,13 @@ def _used_ports(ts):
     return u
 
 
-def _port_free(p, udp=True):
-    for typ in ([socket.SOCK_STREAM, socket.SOCK_DGRAM] if udp else [socket.SOCK_STREAM]):
+def _port_free(p, tcp=True, udp=True):
+    types = []
+    if tcp:
+        types.append(socket.SOCK_STREAM)
+    if udp:
+        types.append(socket.SOCK_DGRAM)
+    for typ in types:
         s = socket.socket(socket.AF_INET, typ)
         try:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -331,7 +344,7 @@ def _port_free(p, udp=True):
     return True
 
 
-def check_port(ts, port, udp, rng):
+def check_port(ts, port, tcp=True, udp=True, rng=None):
     try:
         port = int(port)
     except Exception:
@@ -340,9 +353,9 @@ def check_port(ts, port, udp, rng):
         raise RuntimeError("端口必须在 1-65535")
     if port == int(_base_port() or 0):
         raise RuntimeError("端口 %d 为面板端口" % port)
-    if port in _used_ports(ts):
+    if (tcp and port in _used_tcp(ts)) or (udp and port in _used_udp(ts)):
         raise RuntimeError("端口 %d 已被占用" % port)
-    if not _port_free(port, udp):
+    if not _port_free(port, tcp, udp):
         raise RuntimeError("端口 %d 已被系统占用" % port)
     return port
 
@@ -411,9 +424,9 @@ def _vless_flow(node):
 
 
 def _stream(node):
-    sec = node.get("security", "none"); net = node.get("network", "tcp")
+    sec = node.get("security", "none")
     sni = node.get("sni", "") or _rand_site()
-    st = {"network": net, "security": "none"}
+    st = {"network": "tcp", "security": "none"}
     if sec == "reality":
         st["security"] = "reality"
         st["realitySettings"] = {"show": True, "dest": node.get("dest") or (sni + ":443"), "xver": 0,
@@ -423,10 +436,6 @@ def _stream(node):
         st["security"] = "tls"
         st["tlsSettings"] = {"serverName": sni, "alpn": ["h2", "http/1.1"],
                              "certificates": [{"certificateFile": HY2_CRT, "keyFile": HY2_KEY}]}
-    if net == "ws":
-        st["wsSettings"] = {"path": node.get("ws_path") or "/", "headers": {"Host": sni}}
-    elif net == "grpc":
-        st["grpcSettings"] = {"serviceName": node.get("grpc_service") or "vless"}
     return st
 
 
@@ -780,21 +789,12 @@ def _q(s):
 
 
 def vless_link(node):
-    sec = node.get("security", "none"); net = node.get("network", "tcp")
+    sec = node.get("security", "none")
     q = [("encryption", "none")]
     flow = _vless_flow(node)
     if flow:
         q.append(("flow", flow))
-    if net == "grpc":
-        q.append(("type", "grpc")); q.append(("serviceName", node.get("grpc_service") or "vless"))
-    elif net == "ws":
-        q.append(("type", "ws"))
-        if node.get("ws_path"):
-            q.append(("path", node["ws_path"]))
-        if node.get("sni"):
-            q.append(("host", node["sni"]))
-    else:
-        q.append(("type", "tcp"))
+    q.append(("type", "tcp"))
     if sec == "reality":
         q.append(("security", "reality"))
         if node.get("sni"):
@@ -853,7 +853,7 @@ DASH_TPL = r"""<!doctype html><html><head><meta charset="utf-8">
 <div class="topbar">
   <div class="brand"><span class="logo"></span> limit · {{ t.name }}</div>
   <div style="display:flex;align-items:center;gap:12px;">
-    <span class="tag mono">v1.0.0</span>
+    <span class="tag mono">v1.0.1</span>
     <a class="logout-link" href="{{ P }}/logout">退出登录</a>
   </div>
 </div>
@@ -981,7 +981,7 @@ DASH_TPL = r"""<!doctype html><html><head><meta charset="utf-8">
         </div>
       </div>
     </div>
-    <div class="hint" style="margin-top:10px;">安全 REALITY · 网络 TCP；REALITY 密钥与 UUID 保存时自动生成。</div>
+    <div class="hint" style="margin-top:10px;">安全 REALITY · 传输 TCP；该节点同时承载 TCP 与 UDP 流量。REALITY 密钥与 UUID 保存时自动生成。</div>
     <div class="modal-actions" style="margin-top:16px;"><button type="button" class="btn-cancel" onclick="closeModal('addVlessModal')">取消</button><button type="submit" class="btn-sm">保存节点</button></div>
   </form>
 </div></div>
@@ -1284,7 +1284,7 @@ def add_vless(pt):
         return redirect("/%s/login" % pt)
     ts = load_tenants()
     try:
-        port = check_port(ts, request.form.get("port"), udp=False, rng=VLESS_RANGE)
+        port = check_port(ts, request.form.get("port"), tcp=True, udp=False, rng=VLESS_RANGE)
     except Exception as e:
         _set_flash(str(e), False); return redirect("/%s/" % pt)
     rm = (request.form.get("remark") or "").strip() or ("vless%d" % port)
@@ -1315,7 +1315,7 @@ def add_hy2(pt):
         return redirect("/%s/login" % pt)
     ts = load_tenants()
     try:
-        port = check_port(ts, request.form.get("port"), udp=True, rng=HY2_RANGE)
+        port = check_port(ts, request.form.get("port"), tcp=False, udp=True, rng=HY2_RANGE)
     except Exception as e:
         _set_flash(str(e), False); return redirect("/%s/" % pt)
     name = (request.form.get("name") or "").strip() or ("hy2%d" % port)
@@ -1356,7 +1356,7 @@ def add_fwd(pt):
         _set_flash("目标 IP / 端口必填", False); return redirect("/%s/" % pt)
     ts = load_tenants()
     try:
-        port = check_port(ts, request.form.get("port"), udp=True, rng=FWD_RANGE)
+        port = check_port(ts, request.form.get("port"), tcp=True, udp=True, rng=FWD_RANGE)
     except Exception as e:
         _set_flash(str(e), False); return redirect("/%s/" % pt)
     name = (request.form.get("name") or "").strip() or ("fwd%d" % port)

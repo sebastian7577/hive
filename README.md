@@ -20,7 +20,7 @@ General-purpose panels (3x-ui, Marzban) are **single-admin** or **shared-core mu
 
 ## Features
 
-- **Main panel** (admin): system status, VLESS (REALITY/TLS/WS/gRPC) nodes, Hysteria2 nodes, port forwarding (中转), end-user management, per-user traffic, ufw firewall card, QR / share link / Clash-YAML export.
+- **Main panel** (admin): system status, VLESS (REALITY) nodes, Hysteria2 nodes, port forwarding (中转), end-user management, per-user traffic, ufw firewall card, QR / share link / Clash-YAML export.
 - **Limit (multi-tenant) panel**: every tenant gets its **own panel URL** (**random port + random path**, with isolated credentials and data) served by one multi-tenant web process, and manages **its own** VLESS/Hysteria2/forward nodes and clients, with a **total traffic quota**.
 - **Quota enforcement**: when a tenant hits the quota, all of its nodes are disabled automatically.
 - **Master switch**: pause/resume **all** limit services with one toggle.
@@ -50,6 +50,29 @@ To remove:
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/install.sh) uninstall
 ```
+
+## Versions
+
+- **v1.0.0** — initial public release (previously labelled `v1.10`, renumbered).
+- **v1.0.1** — current:
+  - panel text clarified: a VLESS node carries **both TCP and UDP** traffic;
+  - removed the unused **WebSocket / gRPC / xhttp** transports (UI + code);
+  - the limit panel now judges port conflicts **per protocol**, so a VLESS (TCP) node and a Hysteria2 (UDP) node may share the same port number;
+  - docs: IPv4/IPv6 behaviour, the shared base port, and versioned installs.
+
+Install a **specific version** by appending its tag:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/install.sh) v1.0.0
+```
+
+or, once installed:
+
+```bash
+hive v1.0.0
+```
+
+Without a version it installs/updates to the latest (`main`).
 
 ## Security notes
 
@@ -84,7 +107,15 @@ bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/inst
    limit-xray@<tenant>      limit-hysteria@<node>   ← one process per tenant / per hy2 node
 ```
 
-Each tenant's **random port** is not opened in the firewall; an iptables `REDIRECT` (in `nat/PREROUTING` + `nat/OUTPUT`) maps it to the shared base port, so only the **base port** needs a firewall rule.
+**All tenant panel ports are really one shared base port.** Each tenant's **random port** is only a *virtual* entry: an iptables `REDIRECT` (in `nat/PREROUTING` + `nat/OUTPUT`) rewrites it to the single shared base port, which is the only port actually listening. So only the **base port** needs a firewall rule, and one web process serves every tenant (identified by request port + path).
+
+## Networking (IPv4 / IPv6)
+
+The VLESS and Hysteria2 inbounds are written with `listen: 0.0.0.0`, but Xray binds the **wildcard** address (in practice `::`), so on a host with a public IPv6 address the services are reachable over **both IPv4 and IPv6** (dual-stack); Hysteria2 (`:443`) behaves the same.
+
+The generated **share links / QR codes / Clash-YAML use the public IPv4 address** — that is what clients get by default. To connect over IPv6, put the host's IPv6 address in the client instead.
+
+If clients connect over IPv6, make sure the firewall allows it too (ufw with `IPV6=yes`, the default).
 
 ## Isolation at a glance
 

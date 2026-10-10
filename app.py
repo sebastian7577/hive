@@ -704,7 +704,7 @@ PANEL_HTML = r"""
   <div class="brand"><span class="logo"></span> admin</div>
   <div style="display:flex;align-items:center;gap:12px;">
     <button type="button" class="theme-btn" id="themeBtn" onclick="toggleTheme()" title="切换日夜主题">☾</button>
-    <span class="tag mono" title="版本">v1.0.0</span>
+    <span class="tag mono" title="版本">v1.0.1</span>
     <a class="logout-link" href="javascript:void(0)" onclick="openPwModal()">修改密码</a>
     <a class="logout-link" href="{{ url_for('panel.logout') }}">退出登录</a>
   </div>
@@ -1095,13 +1095,8 @@ PANEL_HTML = r"""
             <option value="none">无</option>
           </select>
         </div>
-        <div id="vl-network-row">
-          <label>网络</label>
-          <select name="network" id="vl-network" onchange="vlGroup()">
-            <option value="tcp">TCP</option>
-            <option value="ws">WebSocket</option>
-            <option value="grpc">gRPC</option>
-          </select>
+        <div class="full">
+          <div class="hint" style="margin-top:0;">传输：TCP —— 同一节点同时承载 TCP 与 UDP 流量</div>
         </div>
         <div class="full">
           <label>域名 / SNI</label>
@@ -1113,14 +1108,6 @@ PANEL_HTML = r"""
         <div class="full" id="vl-dest-row">
           <label>REALITY 目标（dest）</label>
           <input type="text" name="dest" id="vl-dest" autocomplete="off" placeholder="www.amazon.com:443">
-        </div>
-        <div class="full hidden" id="vl-wspath-row">
-          <label>WebSocket 路径</label>
-          <input type="text" name="ws_path" id="vl-wspath" autocomplete="off" placeholder="/">
-        </div>
-        <div class="full hidden" id="vl-grpc-row">
-          <label>gRPC serviceName</label>
-          <input type="text" name="grpc_service" id="vl-grpc" autocomplete="off" placeholder="vless">
         </div>
         <div class="full" id="vl-keys">
           <label>REALITY 密钥</label>
@@ -1412,22 +1399,14 @@ function openAddUserModal(){
   $('addUserModal').classList.add('open');
 }
 function vlGroup(){
-  const sec = $('vl-security').value, netEl = $('vl-network');
-  let net = netEl.value;
-  if (sec === 'reality' && net === 'ws') {
-    net = 'tcp'; netEl.value = net;
-  }
+  const sec = $('vl-security').value;
   if (vlAddMode) {
     $('vl-dest-row').classList.add('hidden');
     $('vl-keys').classList.add('hidden');
-    $('vl-wspath-row').classList.add('hidden');
-    $('vl-grpc-row').classList.add('hidden');
     return;
   }
   $('vl-dest-row').classList.toggle('hidden', sec !== 'reality');
   $('vl-keys').classList.toggle('hidden', sec !== 'reality');
-  $('vl-wspath-row').classList.toggle('hidden', net !== 'ws');
-  $('vl-grpc-row').classList.toggle('hidden', net !== 'grpc');
 }
 let vlAddMode = false;
 async function genKeys(){
@@ -1449,16 +1428,12 @@ function openVlessModal(){
   $('vl-remark').value = 'vless' + (NODES.length + 1);
   $('vl-port').value = '';
   $('vl-security').value = 'reality';
-  $('vl-network').value = 'tcp';
   $('vl-sni').value = '';
   $('vl-dest').value = '';
-  $('vl-wspath').value = '';
-  $('vl-grpc').value = '';
   $('vl-priv').value = '';
   $('vl-pub').textContent = '（保存时自动生成）';
   vlAddMode = true;
   $('vl-security-row').classList.add('hidden');
-  $('vl-network-row').classList.add('hidden');
   $('vl-port').value = randomOpenPort();
   const s = randomSite();
   $('vl-sni').value = s;
@@ -2657,12 +2632,9 @@ def _apply_fwd_cfg(msg):
 
 def _stream_settings(form):
     security = form.get("security", "reality")
-    network = form.get("network", "tcp")
-    if security == "reality" and network not in ("tcp", "grpc", "xhttp"):
-        raise RuntimeError("REALITY 不支持 WebSocket，请改选 TCP 或 gRPC")
     sni = (form.get("sni") or _rand_site()).strip()
     dest = (form.get("dest") or "").strip() or (sni + ":443")
-    stream = {"network": network, "security": "none"}
+    stream = {"network": "tcp", "security": "none"}
     if security == "reality":
         priv, pub = gen_reality_keys()
         stream["security"] = "reality"
@@ -2683,11 +2655,6 @@ def _stream_settings(form):
             "alpn": ["h2", "http/1.1"],
             "certificates": [{"certificateFile": TLS_CERT_FILE, "keyFile": TLS_KEY_FILE}],
         }
-    if network == "ws":
-        stream["wsSettings"] = {"path": (form.get("ws_path") or "/").strip() or "/",
-                                "headers": {"Host": sni}}
-    elif network == "grpc":
-        stream["grpcSettings"] = {"serviceName": (form.get("grpc_service") or "vless").strip()}
     return stream
 
 def vless_inbound_from_form(form, uid):
@@ -3239,24 +3206,7 @@ def _proxy_link(e):
     if e.get("flow"):
         q.append(("flow", e["flow"]))
     sec = e.get("security") or ""
-    net = e.get("network") or "tcp"
-    if net == "grpc":
-        q.append(("type", "grpc"))
-        q.append(("serviceName", e.get("grpc_service") or "vless"))
-    elif net == "xhttp":
-        q.append(("type", "xhttp"))
-        if e.get("ws_path"):
-            q.append(("path", e["ws_path"]))
-        if e.get("sni"):
-            q.append(("host", e["sni"]))
-    elif net == "ws":
-        q.append(("type", "ws"))
-        if e.get("ws_path"):
-            q.append(("path", e["ws_path"]))
-        if e.get("sni"):
-            q.append(("host", e["sni"]))
-    else:
-        q.append(("type", "tcp"))
+    q.append(("type", "tcp"))
     if sec == "reality":
         q.append(("security", "reality"))
         if e.get("sni"):
@@ -3310,8 +3260,6 @@ def _user_proxy_entries(rec):
             reality = stream.get("realitySettings") or {}
             sec = stream.get("security")
             network_raw = stream.get("network") or "tcp"
-            ws_path = (stream.get("wsSettings") or {}).get("path", "") or "/"
-            grpc_service = (stream.get("grpcSettings") or {}).get("serviceName", "") or "vless"
             server_name = (reality.get("serverNames") or [""])[0] or ""
             flow = user_flow_raw(rec, ib)
             pub = _reality_public_key(reality.get("privateKey", ""))
@@ -3355,7 +3303,6 @@ def _user_proxy_entries(rec):
                 "port": int(port), "uuid": uid, "network": network_raw,
                 "security": sec or "", "flow": flow, "sni": server_name,
                 "pub": pub, "sid": short_id,
-                "ws_path": ws_path, "grpc_service": grpc_service,
             }))
         elif b.get("proto") == "hy2":
             h = hy2_by_id.get(str(b.get("node")))
@@ -3897,8 +3844,6 @@ def _render_panel(flash_msg, flash_type):
                 "network": network_raw,
                 "sni": (reality.get("serverNames") or [""])[0] or "",
                 "dest": reality.get("dest", "") or "",
-                "ws_path": (stream.get("wsSettings") or {}).get("path", "") or "",
-                "grpc_service": (stream.get("grpcSettings") or {}).get("serviceName", "") or "",
                 "client_id": first_client.get("id", "") or "",
                 "private_key": reality.get("privateKey", "") or "",
                 "public_key": stream.get("ui_public_key", "") or "",

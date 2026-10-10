@@ -628,7 +628,7 @@ echo -e "  已保留原有节点/用户配置（UUID、密钥、节点端口均�
 echo ""
 fi
 
-echo -e "${GREEN}--- Web Panel (v1.0.0) ---${NC}"
+echo -e "${GREEN}--- Web Panel (v1.0.1) ---${NC}"
 echo -e "  URL:        ${YELLOW}https://${SERVER_IP}:${PANEL_PORT}${PANEL_PATH}/login${NC}"
 if [ "$FRESH" -eq 1 ]; then
     echo -e "  Username:   ${PANEL_USER}"

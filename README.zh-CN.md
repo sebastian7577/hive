@@ -19,7 +19,7 @@
 
 ## 功能
 
-- **主面板（admin）**：系统状态、VLESS（REALITY/TLS/WS/gRPC）节点、Hysteria2 节点、中转、终端用户管理、按用户流量、ufw 防火墙卡片、二维码 / 分享链接 / Clash-YAML 导出。
+- **主面板（admin）**：系统状态、VLESS（REALITY）节点、Hysteria2 节点、中转、终端用户管理、按用户流量、ufw 防火墙卡片、二维码 / 分享链接 / Clash-YAML 导出。
 - **Limit 多租户面板**：每个租户有**自己的面板地址**（**随机端口 + 随机路径**，凭据与数据相互隔离），由一个多租户 Web 进程统一提供服务；每个租户管理**自己的** VLESS/Hysteria2/中转节点与客户端，带**总流量配额**。
 - **配额**：租户达总配额后其全部节点自动停用。
 - **总开关**：一键暂停/恢复**全部** limit 服务。
@@ -49,6 +49,29 @@ hive
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/install.sh) uninstall
 ```
+
+## 版本
+
+- **v1.0.0** —— 首个公开版本（原版本号标为 `v1.10`，现改名为 v1.0.0）。
+- **v1.0.1** —— 当前版本：
+  - 面板文字更正：VLESS 节点**同时承载 TCP 与 UDP** 流量；
+  - 移除未使用的 **WebSocket / gRPC / xhttp** 传输（UI 与代码）；
+  - limit 面板的端口冲突改为**按协议**判定：VLESS（TCP）与 Hysteria2（UDP）可以用同一个端口号；
+  - 文档补充：IPv4/IPv6 行为、共享 base 端口、指定版本安装。
+
+安装**指定版本**：在命令末尾加上版本号即可：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/install.sh) v1.0.0
+```
+
+已安装的话：
+
+```bash
+hive v1.0.0
+```
+
+不带版本号则安装/更新到最新（`main`）。
 
 ## 安全说明
 
@@ -83,7 +106,15 @@ bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/inst
    limit-xray@<租户>        limit-hysteria@<节点>   ← 每租户 / 每 hy2 节点各一个进程
 ```
 
-每个租户的**随机端口不单独在防火墙放行**；由 iptables `REDIRECT`（`nat/PREROUTING` + `nat/OUTPUT`）把它转到共享的 base 端口，所以**只需放行 base 端口**。
+**所有租户面板端口其实只是同一个共享 base 端口。** 每个租户的**随机端口只是“虚拟入口”**：由 iptables `REDIRECT`（`nat/PREROUTING` + `nat/OUTPUT`）把它改写成那个唯一在监听的共享 base 端口。所以**只需放行 base 端口**，且由一个 Web 进程按“请求端口 + 路径”服务所有租户。
+
+## 网络（IPv4 / IPv6）
+
+VLESS 与 Hysteria2 的入站配置写的是 `listen: 0.0.0.0`，但 Xray 实际绑定**通配地址**（通常是 `::`），因此在有公网 IPv6 的主机上，服务**IPv4 与 IPv6 都能访问**（双栈）；Hysteria2（`:443`）同样如此。
+
+生成的**分享链接 / 二维码 / Clash-YAML 用的是公网 IPv4 地址** —— 这是客户端默认拿到的地址。要经 IPv6 连接，请在客户端里换成主机的 IPv6 地址。
+
+若客户端走 IPv6 直连，请确保防火墙也放行 IPv6（ufw 默认 `IPV6=yes`）。
 
 ## 隔离一览
 

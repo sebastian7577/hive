@@ -32,6 +32,12 @@ if [ "$1" = "uninstall" ]; then
     exit 0
 fi
 
+# Optional version: `install.sh v1.0.0` installs that tag; no argument = latest (main).
+REF_KIND="heads"; REF_NAME="$BRANCH"
+case "$1" in
+    v[0-9]*) REF_KIND="tags"; REF_NAME="$1" ;;
+esac
+
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq >/dev/null 2>&1 || true
 apt-get install -y -qq curl tar ca-certificates >/dev/null 2>&1 || true
@@ -39,8 +45,8 @@ apt-get install -y -qq curl tar ca-certificates >/dev/null 2>&1 || true
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-echo -e "${YELLOW}[*] Downloading Hive (${REPO}@${BRANCH})...${NC}"
-curl -fsSL "https://github.com/${REPO}/archive/refs/heads/${BRANCH}.tar.gz" -o "$TMP/hive.tar.gz"
+echo -e "${YELLOW}[*] Downloading Hive (${REPO}@${REF_NAME})...${NC}"
+curl -fsSL "https://github.com/${REPO}/archive/refs/${REF_KIND}/${REF_NAME}.tar.gz" -o "$TMP/hive.tar.gz"
 tar -xzf "$TMP/hive.tar.gz" -C "$TMP"
 SRC="$(find "$TMP" -maxdepth 1 -type d -name 'hive-*' | head -n1)"
 [ -n "$SRC" ] && [ -f "$SRC/deploy.sh" ] || { echo -e "${RED}Download/extract failed${NC}"; exit 1; }
@@ -59,7 +65,7 @@ bash "$SRC/limit/deploy-limit.sh"
 
 cat > /usr/local/bin/hive <<EOF
 #!/bin/bash
-exec bash <(curl -fsSL ${RAW}/install.sh)
+exec bash <(curl -fsSL ${RAW}/install.sh) "\$@"
 EOF
 chmod +x /usr/local/bin/hive
 
