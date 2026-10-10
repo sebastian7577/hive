@@ -8,7 +8,7 @@ Runtime state lives under /usr/local/etc/xray/ (configs, users, hy2 nodes,
 fwd rules, traffic totals) and /opt/xray-viewer/ (url_prefix, server_ip,
 secret_key, panel_auth.json, tls.crt/tls.key).
 
-This is the first version — see README.md.
+See README.md.
 """
 
 import json, os, functools, datetime, subprocess, uuid, shutil, secrets, sys, threading, time, re, hashlib, hmac, socket

@@ -4,7 +4,7 @@ Small read-only helpers that query the per-tenant Xray stats API and each
 tenant's Hysteria2 traffic-stats endpoint; the limit collector does the actual
 accumulation.
 
-This is the first version — see README.md.
+See README.md.
 """
 
 import json, subprocess, urllib.request

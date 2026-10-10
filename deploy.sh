@@ -3,7 +3,7 @@
 # Installs Xray (VLESS/REALITY) + Hysteria2 + the web panel: generates the
 # config, a self-signed TLS cert, hashed panel credentials and the systemd
 # units. Re-running preserves existing data, port, path and credentials.
-# First version — see README.md.
+# See README.md.
 set -e
 
 

@@ -2,9 +2,7 @@
 
 > **One server, many isolated tenants.** A multi-tenant Xray (VLESS/REALITY) + Hysteria2 panel with a built-in reseller sub-panel, per-tenant traffic quotas, and process-level isolation.
 
-> ⚠️ **This is the first version.** It is early and rough: features are incomplete,
-> docs are thin, and there are certainly bugs we haven't found yet. Treat it as a
-> starting point rather than a finished product. Issues and pull requests are welcome.
+> **Hive is at v1.0.1** — a young but working project. The core (multi-tenant isolation, per-tenant quotas, VLESS/REALITY + Hysteria2) is solid and runs in production; some rough edges remain. Feedback, issues and pull requests are welcome.
 
 [中文说明](README.zh-CN.md)
 
@@ -28,6 +26,8 @@ General-purpose panels (3x-ui, Marzban) are **single-admin** or **shared-core mu
 - **Per-tenant isolated instances**: each tenant's Xray runs as its **own process** (`limit-xray@<tenant>`, own config + own stats API) and each Hysteria2 node as its own process too — one tenant (or protocol) failing does not take the others down. The main panel's status card can also restart the main VLESS and Hysteria2 processes independently.
 - **HTTPS panels**: both panels serve TLS with an auto-generated self-signed certificate; the browser shows a one-time warning.
 - **Isolation first**: each tenant's proxies run as separate sandboxed processes (exposure score down to **1.9–4.0**); the tenant web process runs as a **non-root** user and performs privileged actions only through a **narrow root helper**.
+- **Sensible defaults — fewer choices.** Most node options are pre-set to high-reliability values: VLESS is always REALITY + TCP with auto-generated keys and a randomised SNI/dest; Hysteria2 uses a self-signed cert with a randomised SNI; ports are auto-picked and forwarding is TCP+UDP. In practice you just name the node — nothing else to tune, so a working node takes seconds.
+- **One port, two protocols.** A VLESS node supports **both TCP and UDP** (it only *carries* UDP when needed) while Hysteria2 is UDP-only — so a VLESS node and a Hysteria2 node can share the **same port number**; the panel no longer flags it as a conflict.
 
 ## Install
 
@@ -55,9 +55,9 @@ bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/inst
 
 - **v1.0.0** — initial public release (previously labelled `v1.10`, renumbered).
 - **v1.0.1** — current:
-  - panel text clarified: a VLESS node carries **both TCP and UDP** traffic;
+  - clearer wording: a VLESS node supports **both TCP and UDP** (it only carries UDP when needed), so it never conflicts with a UDP Hysteria2 node on the same port;
   - removed the unused **WebSocket / gRPC / xhttp** transports (UI + code);
-  - the limit panel now judges port conflicts **per protocol**, so a VLESS (TCP) node and a Hysteria2 (UDP) node may share the same port number;
+  - the limit panel now judges port conflicts **per protocol**, so a VLESS node and a Hysteria2 node may share the same port number;
   - docs: IPv4/IPv6 behaviour, the shared base port, and versioned installs.
 
 Install a **specific version** by appending its tag:
@@ -111,11 +111,7 @@ Without a version it installs/updates to the latest (`main`).
 
 ## Networking (IPv4 / IPv6)
 
-The VLESS and Hysteria2 inbounds are written with `listen: 0.0.0.0`, but Xray binds the **wildcard** address (in practice `::`), so on a host with a public IPv6 address the services are reachable over **both IPv4 and IPv6** (dual-stack); Hysteria2 (`:443`) behaves the same.
-
-The generated **share links / QR codes / Clash-YAML use the public IPv4 address** — that is what clients get by default. To connect over IPv6, put the host's IPv6 address in the client instead.
-
-If clients connect over IPv6, make sure the firewall allows it too (ufw with `IPV6=yes`, the default).
+The generated **share links / QR codes / Clash-YAML use the public IPv4 address**, but the server supports **both IPv4 and IPv6** — so the same node works whether a client connects over IPv4 or IPv6.
 
 ## Isolation at a glance
 

@@ -3,7 +3,7 @@
 # Downloads the repo, runs deploy.sh (main panel) and limit/deploy-limit.sh,
 # then installs the `hive` shortcut. Re-running the same command updates in
 # place (existing nodes/users/tenants/port/path/credentials are kept).
-# First version — see README.md.
+# See README.md.
 set -e
 
 REPO="sebastian7577/hive"

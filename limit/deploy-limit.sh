@@ -3,7 +3,7 @@
 # Creates the non-root `limitpanel` user, the root `limit-helper`, the panel
 # files, a self-signed TLS cert and the systemd units. Idempotent: re-running
 # keeps the existing tenants, port and certs.
-# First version — see README.md.
+# See README.md.
 set -e
 
 [ "$(id -u)" -eq 0 ] || { echo "run as root"; exit 1; }

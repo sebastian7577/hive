@@ -9,7 +9,7 @@ over a unix socket instead of running as root itself.
 Runtime state lives under /opt/limit/ (data/tenants.json, xray/, hysteria/,
 panel_port, secret_key, tls.crt/tls.key).
 
-This is the first version — see README.md.
+See README.md.
 """
 
 import json, os, sys, re, secrets, hashlib, subprocess, threading, time, datetime, fcntl, contextlib, socket, uuid, urllib.request, urllib.parse
