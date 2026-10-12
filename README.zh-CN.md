@@ -2,7 +2,7 @@
 
 > **一台服务器，多个互不可见的租户。** 面向转售/多租户的 Xray（VLESS/REALITY）+ Hysteria2 面板，内置管理员子面板、按租户总流量配额，以及进程级隔离。
 
-> **Hive 目前是 v1.0.1** —— 一个年轻但可用的项目。核心功能（多租户隔离、按租户配额、VLESS/REALITY + Hysteria2）已经稳定并在实际使用；细节仍有打磨空间。欢迎提 Issue 和 PR。
+> **Hive** —— 一个年轻但可用的项目。核心功能（多租户隔离、按租户配额、VLESS/REALITY + Hysteria2）已经稳定并在实际使用；细节仍有打磨空间。欢迎提 Issue 和 PR。
 
 [English](README.md)
 
@@ -27,7 +27,9 @@
 - **HTTPS 面板**：两个面板都用自动生成的自签证书提供 TLS；浏览器会提示一次证书不受信任。
 - **隔离优先**：各租户的代理都跑在独立、沙箱化的进程里（暴露分低至 **1.9–4.0**）；租户 Web 进程以**非 root** 运行，特权动作只经**窄接口 root helper**。
 - **默认即最佳实践，可选项更少。** 大部分节点配置都预置为高可靠性参数：VLESS 固定 REALITY + TCP，密钥自动生成、SNI/目标域名随机；Hysteria2 用自签证书、SNI 随机；端口自动选取、中转自动 TCP+UDP。实际只要给节点起个名字——没有别的要调，几秒就能建好一个可用节点。
-- **一个端口可两用。** VLESS 节点**同时支持 TCP 与 UDP**（只是“支持”，需要时才走 UDP），Hysteria2 只走 UDP —— 所以两者可以安全地**共用同一个端口号**，面板也不会再判成冲突。
+- **一个端口可两用。** VLESS 节点**同时支持 TCP 与 UDP**（只是“支持”，需要时才走 UDP），Hysteria2 只走 UDP —— 所以两者可以安全地**共用同一个端口号**，面板不会判成冲突。
+- **防火墙自动维护。** 节点端口按协议自动放行并对账 —— VLESS 走 `tcp+udp`、Hysteria2 走 `udp`、中转走 `tcp+udp`，均覆盖 **IPv4 与 IPv6**；增删节点只增删仍需要的规则，暂停不动防火墙。
+- **调整租户配额**：在主面板的 limit 卡片即可操作 —— 调到低于已用量立即停用该租户，调回去即恢复。
 
 ## 安装
 
@@ -45,32 +47,17 @@ bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/inst
 hive
 ```
 
+安装**指定版本**：在命令末尾加上 tag 即可（已安装则用 `hive <tag>`）：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/install.sh) <tag>
+```
+
 卸载：
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/install.sh) uninstall
 ```
-
-## 版本
-
-- **v1.0.3** —— 当前版本：修复「调整配额」弹窗的「取消」按钮无法关闭。
-- **v1.0.2** —— 防火墙按协议自动对账（VLESS→`tcp+udp`、Hysteria2→`udp`、中转→`tcp+udp`，均 IPv4+IPv6）；limit 卡片新增「调整配额」；修复手动放行 tcp+udp 的无类型规则。
-- **v1.0.1** —— 表述更清晰（VLESS 承载 TCP+UDP）、移除未用的 WebSocket/gRPC/xhttp、端口按协议判定、补充 IPv4/IPv6 与共享 base 端口文档。
-- **v1.0.0** —— 首个公开版本（原 v1.10）。
-
-安装**指定版本**：在命令末尾加上版本号即可：
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/install.sh) v1.0.0
-```
-
-已安装的话：
-
-```bash
-hive v1.0.0
-```
-
-不带版本号则安装/更新到最新（`main`）。
 
 ## 安全说明
 

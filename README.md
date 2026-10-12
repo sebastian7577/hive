@@ -2,7 +2,7 @@
 
 > **One server, many isolated tenants.** A multi-tenant Xray (VLESS/REALITY) + Hysteria2 panel with a built-in reseller sub-panel, per-tenant traffic quotas, and process-level isolation.
 
-> **Hive is at v1.0.1** — a young but working project. The core (multi-tenant isolation, per-tenant quotas, VLESS/REALITY + Hysteria2) is solid and runs in production; some rough edges remain. Feedback, issues and pull requests are welcome.
+> **Hive** — a young but working project. The core (multi-tenant isolation, per-tenant quotas, VLESS/REALITY + Hysteria2) is solid and runs in production; some rough edges remain. Feedback, issues and pull requests are welcome.
 
 [中文说明](README.zh-CN.md)
 
@@ -27,7 +27,9 @@ General-purpose panels (3x-ui, Marzban) are **single-admin** or **shared-core mu
 - **HTTPS panels**: both panels serve TLS with an auto-generated self-signed certificate; the browser shows a one-time warning.
 - **Isolation first**: each tenant's proxies run as separate sandboxed processes (exposure score down to **1.9–4.0**); the tenant web process runs as a **non-root** user and performs privileged actions only through a **narrow root helper**.
 - **Sensible defaults — fewer choices.** Most node options are pre-set to high-reliability values: VLESS is always REALITY + TCP with auto-generated keys and a randomised SNI/dest; Hysteria2 uses a self-signed cert with a randomised SNI; ports are auto-picked and forwarding is TCP+UDP. In practice you just name the node — nothing else to tune, so a working node takes seconds.
-- **One port, two protocols.** A VLESS node supports **both TCP and UDP** (it only *carries* UDP when needed) while Hysteria2 is UDP-only — so a VLESS node and a Hysteria2 node can share the **same port number**; the panel no longer flags it as a conflict.
+- **One port, two protocols.** A VLESS node supports **both TCP and UDP** (it only *carries* UDP when needed) while Hysteria2 is UDP-only — so a VLESS node and a Hysteria2 node can share the **same port number**, and the panel does not flag it as a conflict.
+- **Firewall, kept in sync for you.** Node ports are opened and reconciled automatically, per protocol — VLESS on `tcp+udp`, Hysteria2 on `udp`, forwarding on `tcp+udp` — over **IPv4 and IPv6**. Adding or removing a node only changes what is still needed, and pausing never touches the firewall.
+- **Adjust a tenant's quota** from the main panel's limit card: lower it below the usage to stop a tenant instantly, raise it back to resume.
 
 ## Install
 
@@ -45,32 +47,17 @@ Update in place (keeps your nodes, users, tenants, port, path and credentials) b
 hive
 ```
 
+To install a **specific release** instead of the latest, append its tag (or run `hive <tag>` once installed):
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/install.sh) <tag>
+```
+
 To remove:
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/install.sh) uninstall
 ```
-
-## Versions
-
-- **v1.0.3** — current: fix — the "adjust quota" dialog's Cancel button now closes it.
-- **v1.0.2** — firewall rules are per-protocol and auto-reconciled (VLESS → `tcp+udp`, Hysteria2 → `udp`, forwarding → `tcp+udp`, all IPv4+IPv6); the limit card gains an adjust-quota button; fixed the typeless "allow port (tcp+udp)" rule.
-- **v1.0.1** — clearer wording (VLESS carries TCP+UDP), dropped the unused WebSocket/gRPC/xhttp transports, per-protocol port checks, IPv4/IPv6 + shared-base-port docs.
-- **v1.0.0** — initial public release (previously labelled `v1.10`).
-
-Install a **specific version** by appending its tag:
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/install.sh) v1.0.0
-```
-
-or, once installed:
-
-```bash
-hive v1.0.0
-```
-
-Without a version it installs/updates to the latest (`main`).
 
 ## Security notes
 
