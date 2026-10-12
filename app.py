@@ -705,7 +705,7 @@ PANEL_HTML = r"""
   <div class="brand"><span class="logo"></span> admin</div>
   <div style="display:flex;align-items:center;gap:12px;">
     <button type="button" class="theme-btn" id="themeBtn" onclick="toggleTheme()" title="切换日夜主题">☾</button>
-    <span class="tag mono" title="版本">v1.0.2</span>
+    <span class="tag mono" title="版本">v1.0.3</span>
     <a class="logout-link" href="javascript:void(0)" onclick="openPwModal()">修改密码</a>
     <a class="logout-link" href="{{ url_for('panel.logout') }}">退出登录</a>
   </div>
@@ -1367,7 +1367,7 @@ function switchSni(which){
     }
   }
 }
-function closeModals(){ ['vlessModal','hy2Modal','fwdModal','addUserModal','addNodeModal','hy2PassModal','qrModal','pwModal'].forEach(id => { const el = $(id); if (el) el.classList.remove('open'); }); }
+function closeModals(){ ['vlessModal','hy2Modal','fwdModal','addUserModal','addNodeModal','hy2PassModal','qrModal','pwModal','quotaModal'].forEach(id => { const el = $(id); if (el) el.classList.remove('open'); }); }
 function openPwModal(){ $('pwModal').classList.add('open'); }
 function showQR(text, title){
   $('qrTitle').textContent = title || '节点二维码';

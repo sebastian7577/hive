@@ -843,7 +843,7 @@ DASH_TPL = r"""<!doctype html><html><head><meta charset="utf-8">
 <div class="topbar">
   <div class="brand"><span class="logo"></span> limit · {{ t.name }}</div>
   <div style="display:flex;align-items:center;gap:12px;">
-    <span class="tag mono">v1.0.2</span>
+    <span class="tag mono">v1.0.3</span>
     <a class="logout-link" href="{{ P }}/logout">退出登录</a>
   </div>
 </div>

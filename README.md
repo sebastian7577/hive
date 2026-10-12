@@ -53,10 +53,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/inst
 
 ## Versions
 
-- **v1.0.2** — current:
-  - firewall rules are per-protocol and auto-reconciled: VLESS → `tcp+udp`, Hysteria2 → `udp`, forwarding → `tcp+udp`, all **IPv4+IPv6**; add/delete only changes what is still needed, and pausing never touches the firewall;
-  - the main panel's limit card gains an **adjust-quota** button;
-  - fix: the main panel's manual "allow port (tcp+udp)" now creates two explicit rules instead of a typeless one.
+- **v1.0.3** — current: fix — the "adjust quota" dialog's Cancel button now closes it.
+- **v1.0.2** — firewall rules are per-protocol and auto-reconciled (VLESS → `tcp+udp`, Hysteria2 → `udp`, forwarding → `tcp+udp`, all IPv4+IPv6); the limit card gains an adjust-quota button; fixed the typeless "allow port (tcp+udp)" rule.
 - **v1.0.1** — clearer wording (VLESS carries TCP+UDP), dropped the unused WebSocket/gRPC/xhttp transports, per-protocol port checks, IPv4/IPv6 + shared-base-port docs.
 - **v1.0.0** — initial public release (previously labelled `v1.10`).
 
