@@ -53,12 +53,12 @@ bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/inst
 
 ## 版本
 
-- **v1.0.0** —— 首个公开版本（原版本号标为 `v1.10`，现改名为 v1.0.0）。
-- **v1.0.1** —— 当前版本：
-  - 表述更通俗：VLESS 节点**同时支持 TCP 与 UDP**（只是支持，需要时才走 UDP），所以和同端口走 UDP 的 Hysteria2 不会冲突；
-  - 移除未使用的 **WebSocket / gRPC / xhttp** 传输（UI 与代码）；
-  - limit 面板的端口冲突改为**按协议**判定：VLESS 与 Hysteria2 可以用同一个端口号；
-  - 文档补充：IPv4/IPv6 行为、共享 base 端口、指定版本安装。
+- **v1.0.2** —— 当前版本：
+  - 防火墙按协议自动对账：VLESS→`tcp+udp`、Hysteria2→`udp`、中转→`tcp+udp`，均 **IPv4+IPv6**；增删节点只增删仍需要的规则，暂停不动防火墙；
+  - 主面板 limit 卡片新增「**调整配额**」按钮；
+  - 修复：主面板手动「放行端口 (tcp+udp)」改为两条显式规则，不再出现无类型规则。
+- **v1.0.1** —— 表述更清晰（VLESS 承载 TCP+UDP）、移除未用的 WebSocket/gRPC/xhttp、端口按协议判定、补充 IPv4/IPv6 与共享 base 端口文档。
+- **v1.0.0** —— 首个公开版本（原 v1.10）。
 
 安装**指定版本**：在命令末尾加上版本号即可：
 

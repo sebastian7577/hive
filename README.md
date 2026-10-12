@@ -53,12 +53,12 @@ bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/inst
 
 ## Versions
 
-- **v1.0.0** — initial public release (previously labelled `v1.10`, renumbered).
-- **v1.0.1** — current:
-  - clearer wording: a VLESS node supports **both TCP and UDP** (it only carries UDP when needed), so it never conflicts with a UDP Hysteria2 node on the same port;
-  - removed the unused **WebSocket / gRPC / xhttp** transports (UI + code);
-  - the limit panel now judges port conflicts **per protocol**, so a VLESS node and a Hysteria2 node may share the same port number;
-  - docs: IPv4/IPv6 behaviour, the shared base port, and versioned installs.
+- **v1.0.2** — current:
+  - firewall rules are per-protocol and auto-reconciled: VLESS → `tcp+udp`, Hysteria2 → `udp`, forwarding → `tcp+udp`, all **IPv4+IPv6**; add/delete only changes what is still needed, and pausing never touches the firewall;
+  - the main panel's limit card gains an **adjust-quota** button;
+  - fix: the main panel's manual "allow port (tcp+udp)" now creates two explicit rules instead of a typeless one.
+- **v1.0.1** — clearer wording (VLESS carries TCP+UDP), dropped the unused WebSocket/gRPC/xhttp transports, per-protocol port checks, IPv4/IPv6 + shared-base-port docs.
+- **v1.0.0** — initial public release (previously labelled `v1.10`).
 
 Install a **specific version** by appending its tag:
 

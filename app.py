@@ -306,6 +306,7 @@ def _limit_view():
                     "user": t.get("user", ""), "pass": t.get("pass", ""), "port": pp,
                     "addr": ("https://%s:%s/%s/login" % (ip, pp, t.get("path", ""))) if pp else "",
                     "exhausted": bool(t.get("exhausted")),
+                    "quota_gb": (round(q / 1073741824, 2) if q else 0),
                     "used_h": human_bytes(used), "quota_h": human_bytes(q),
                     "pct": (min(100, int(used * 100 / q)) if q else 0)})
     return out
@@ -704,7 +705,7 @@ PANEL_HTML = r"""
   <div class="brand"><span class="logo"></span> admin</div>
   <div style="display:flex;align-items:center;gap:12px;">
     <button type="button" class="theme-btn" id="themeBtn" onclick="toggleTheme()" title="切换日夜主题">☾</button>
-    <span class="tag mono" title="版本">v1.0.1</span>
+    <span class="tag mono" title="版本">v1.0.2</span>
     <a class="logout-link" href="javascript:void(0)" onclick="openPwModal()">修改密码</a>
     <a class="logout-link" href="{{ url_for('panel.logout') }}">退出登录</a>
   </div>
@@ -959,6 +960,7 @@ PANEL_HTML = r"""
             <div class="admin-actions">
               <button type="button" class="btn-sm-reset" onclick="copyText('{{ t.addr }}','已复制地址')">复制地址</button>
               <button type="button" class="btn-sm-reset" onclick="copyText('{{ t.pass }}','已复制密码')">复制密码</button>
+              <button type="button" class="btn-sm-reset" onclick="openQuotaModal('{{ t.id }}','{{ t.name }}','{{ t.quota_gb }}')">调整配额</button>
               <form class="async-form" method="post" action="{{ url_for('panel.admin_reset', tid=t.id) }}" style="margin:0;">
                 <button type="submit" class="btn-sm-warn">重置</button>
               </form>
@@ -1121,6 +1123,25 @@ PANEL_HTML = r"""
       <div class="modal-actions" style="margin-top:18px;">
         <button type="button" class="btn-cancel" onclick="closeModals()">取消</button>
         <button type="submit" class="btn-sm">保存节点</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="quotaModal">
+  <div class="modal-box" style="width:420px;">
+    <h3 id="quotaModalTitle">调整配额</h3>
+    <form method="post" id="quotaForm" class="async-form">
+      <div class="form-grid">
+        <div class="full">
+          <label>总流量配额（GB）</label>
+          <input type="number" name="quota_gb" id="quota-gb" min="1" step="1" required autocomplete="off">
+          <div class="hint">调整后立即生效：用量低于新配额会自动恢复，达到或超过则立即停用。</div>
+        </div>
+      </div>
+      <div class="modal-actions" style="margin-top:18px;">
+        <button type="button" class="btn-cancel" onclick="closeModals()">取消</button>
+        <button type="submit" class="btn-sm">保存</button>
       </div>
     </form>
   </div>
@@ -1419,6 +1440,13 @@ async function genKeys(){
       $('vl-pub').textContent = d.public;
     }
   } catch (e) {}
+}
+function openQuotaModal(tid, name, gb){
+  const f = $('quotaForm');
+  f.action = APIBASE + 'admin/setquota/' + tid;
+  $('quotaModalTitle').textContent = '调整配额 · ' + name;
+  $('quota-gb').value = gb || '';
+  $('quotaModal').classList.add('open');
 }
 function openVlessModal(){
   const f = $('vlessForm');
@@ -2460,23 +2488,72 @@ def load_fwd_rules():
 def save_fwd_rules(rules):
     atomic_write_json(FWD_RULES_PATH, rules, chmod=0o644)
 
-def _ufw_rules(port, action="allow"):
-    """给端口放行/取消放行 ufw 的 tcp+udp 规则（无 ufw 环境静默跳过）。
-    中端口是用户任意填的，deploy 只放行 22/443，所以必须动态放行，否则外网客户端被 ufw 拦截导致 timeout。"""
+UFW_TRACK_PATH = "/opt/xray-viewer/ufw_ports.json"
+
+def _ufw_tracked():
+    try:
+        with open(UFW_TRACK_PATH) as f:
+            return set((int(p), str(pr)) for p, pr in json.load(f))
+    except Exception:
+        return set()
+
+def _ufw_save_tracked(s):
+    try:
+        os.makedirs(os.path.dirname(UFW_TRACK_PATH), exist_ok=True)
+        tmp = UFW_TRACK_PATH + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(sorted([list(x) for x in s]), f)
+        os.replace(tmp, UFW_TRACK_PATH)
+    except Exception:
+        pass
+
+def _ufw_desired():
+    """每个节点端口应放行的 (port, proto)：vless→tcp+udp，hy2→udp，中转→tcp+udp（含暂停中的节点）。"""
+    d = set()
+    def _add(port):
+        d.add((int(port), "tcp")); d.add((int(port), "udp"))
+    try:
+        with open(CONFIG_PATH) as f:
+            cfg = json.load(f)
+        for ib in cfg.get("inbounds", []):
+            if ib.get("protocol", "").lower() in EXCLUDED_PROTOCOLS:
+                continue
+            if ib.get("port"):
+                _add(ib["port"])
+    except Exception:
+        pass
+    for ib in load_disabled_inbounds():
+        if ib.get("protocol", "").lower() in EXCLUDED_PROTOCOLS:
+            continue
+        if ib.get("port"):
+            _add(ib["port"])
+    for r in load_fwd_rules():
+        if r.get("listen_port"):
+            _add(r["listen_port"])
+    for n in load_hy2_nodes():
+        if n.get("port"):
+            d.add((int(n["port"]), "udp"))
+    return d
+
+def _ufw_reconcile():
+    """把 ufw 对账到当前节点集合：缺的补、多的删（按 (port,proto)）。暂停不影响，故不改规则。"""
     if not shutil.which("ufw"):
         return
     try:
-        for proto in ("tcp", "udp"):
-            if action == "allow":
-                subprocess.run(["ufw", "delete", "allow", "%d/%s" % (port, proto)],
-                               capture_output=True, timeout=15)
-                subprocess.run(["ufw", "allow", "%d/%s" % (port, proto)],
-                               capture_output=True, timeout=15)
-            else:
-                subprocess.run(["ufw", "delete", "allow", "%d/%s" % (port, proto)],
-                               capture_output=True, timeout=15)
+        desired = _ufw_desired()
+    except Exception:
+        return
+    tracked = _ufw_tracked()
+    try:
+        for (p, proto) in sorted(desired - tracked):
+            subprocess.run(["ufw", "allow", "%d/%s" % (p, proto)],
+                           capture_output=True, timeout=15)
+        for (p, proto) in sorted(tracked - desired):
+            subprocess.run(["ufw", "delete", "allow", "%d/%s" % (p, proto)],
+                           capture_output=True, timeout=15)
     except Exception:
         pass
+    _ufw_save_tracked(desired)
 
 _def_panel_port = {"v": None}
 
@@ -2611,6 +2688,9 @@ def check_fwd_port_conflict(rules, port, exclude_id=None, cfg=None):
                 continue
             if int(ib.get("port", 0)) == int(port):
                 return ib.get("port")
+    for n in load_hy2_nodes():
+        if int(n.get("port", 0)) == int(port):
+            return n.get("port")
     return None
 
 def _find_fwd_rule(rule_id):
@@ -3384,6 +3464,7 @@ def inbound_add():
         ok, err = write_config_and_restart(cfg)
         if not ok:
             raise RuntimeError("配置已写入但 xray 未启动：%s" % err)
+        _ufw_reconcile()
         msg = (
             "已添加 vless 入站 :%d<br>客户端在「用户」面板中绑定"
             % port
@@ -3427,6 +3508,7 @@ def inbound_delete(port):
             if data is not None:
                 if _prune_user_bindings(data["users"], "vless", port):
                     save_users(data)
+        _ufw_reconcile()
         msg = "入站 :%d 已删除%s" % (
             port, ("（含其客户端）" if removed is not None else "（已暂停条目）"))
     except Exception as e:
@@ -3453,6 +3535,7 @@ def inbound_toggle(port):
             ok, err = write_config_and_restart(cfg)
             if ok:
                 save_disabled_inbounds(disabled)
+                _ufw_reconcile()
                 msg = "入站 :%d 已暂停，可随时恢复" % port
             else:
                 msg = "暂停失败，xray 重启出错：%s" % err
@@ -3467,6 +3550,7 @@ def inbound_toggle(port):
             ok, err = write_config_and_restart(cfg)
             if ok:
                 save_disabled_inbounds(disabled)
+                _ufw_reconcile()
                 msg = "入站 :%d 已恢复运行" % port
             else:
                 msg = "恢复失败，xray 重启出错：%s" % err
@@ -3542,6 +3626,7 @@ def hy2node_add():
         nodes = load_hy2_nodes()
         nodes.append(node)
         save_hy2_nodes(nodes)
+        _ufw_reconcile()
         msg = "Hysteria2 节点 %s (:UDP/%d) 已保存，请在列表「用户」栏添加第一个用户（添加时自动启动服务）" % (name, port)
     except Exception as e:
         msg = "添加节点失败：%s" % e
@@ -3566,6 +3651,7 @@ def hy2node_delete(node_id):
         if data is not None:
             if _prune_user_bindings(data["users"], "hy2", node_id):
                 save_users(data)
+        _ufw_reconcile()
         msg = "Hysteria2 节点 %s 已删除" % (node.get("name") or node.get("id"))
     except Exception as e:
         msg = "删除节点失败：%s" % e
@@ -3585,6 +3671,7 @@ def hy2node_toggle(node_id):
         msg, ok = _flash_save_apply(nodes, node,
                                     "Hysteria2 节点 %s 已%s" % (node.get("name") or node.get("id"),
                                                               "启动" if node["enabled"] else "停止"))
+        _ufw_reconcile()
         return _panel_state(msg, ok)
     except Exception as e:
         return _panel_state("操作失败：%s" % e, False)
@@ -3627,7 +3714,7 @@ def fwd_add():
         rules = load_fwd_rules()
         rules.append(rule)
         save_fwd_rules(rules)
-        _ufw_rules(listen_port, "allow")
+        _ufw_reconcile()
         _apply_fwd_cfg("中转 %s (本机 :%d → %s:%d) 已启动" % (name, listen_port, target_ip, target_port))
         msg = "中转 %s (本机 :%d → %s:%d) 已启动" % (name, listen_port, target_ip, target_port)
     except Exception as e:
@@ -3646,7 +3733,7 @@ def fwd_toggle(rule_id):
             raise RuntimeError("未找到该中转")
         r["enabled"] = not r.get("enabled", True)
         save_fwd_rules(rules)
-        _ufw_rules(r["listen_port"], "allow" if r["enabled"] else "deny")
+        _ufw_reconcile()
         _apply_fwd_cfg("中转 %s 已%s" % (r.get("name"), "启动" if r["enabled"] else "停止"))
         msg = "中转 %s 已%s" % (r.get("name"), "启动" if r["enabled"] else "停止")
     except Exception as e:
@@ -3665,7 +3752,7 @@ def fwd_delete(rule_id):
             raise RuntimeError("未找到该中转")
         rules.remove(r)
         save_fwd_rules(rules)
-        _ufw_rules(r["listen_port"], "deny")
+        _ufw_reconcile()
         _apply_fwd_cfg("中转 %s 已删除" % r.get("name"))
         msg = "中转 %s 已删除" % r.get("name")
     except Exception as e:
@@ -3710,9 +3797,10 @@ def firewall_allow():
             args += ["from", ip, "to", "any", "port", str(port), "proto", proto]
         else:
             if proto == "both":
-                args.append(str(port))
-            else:
-                args.append("%d/%s" % (port, proto))
+                for pr in ("tcp", "udp"):
+                    _ufw_run(["allow", "%d/%s" % (port, pr)])
+                return jsonify({"ok": True, "msg": "已放行端口 %s (tcp+udp)" % port})
+            args.append("%d/%s" % (port, proto))
         _ufw_run(args)
         return jsonify({"ok": True, "msg": "已放行 %s" % ("%s → %s/%s" % (ip, port, proto) if ip else "端口 %s" % port)})
     except Exception as e:
@@ -4042,6 +4130,32 @@ def admin_reset(tid):
     if ok:
         return _panel_state("已重置该limit用户流量配额", ok=True)
     return _panel_state("重置失败：%s" % err, ok=False)
+
+@panel.route("/admin/setquota/<tid>", methods=["POST"])
+@login_required
+def admin_setquota(tid):
+    qg = (request.form.get("quota_gb") or "").strip()
+    try:
+        q = int(float(qg) * 1073741824)
+    except Exception:
+        q = 0
+    if q <= 0:
+        return _panel_state("请填写有效的总配额(GB)", ok=False)
+    def _mut(ts):
+        for t in ts:
+            if t.get("id") == tid:
+                t["quota_bytes"] = q
+                used = int(t.get("used_up", 0)) + int(t.get("used_down", 0))
+                if used < q:
+                    t["exhausted"] = False; t["enabled"] = True
+                else:
+                    t["exhausted"] = True; t["enabled"] = False
+                return
+        raise RuntimeError("未找到该limit用户")
+    ok, err = _limit_update(_mut)
+    if ok:
+        return _panel_state("已调整该limit用户配额", ok=True)
+    return _panel_state("调整失败：%s" % err, ok=False)
 
 @panel.route("/admin/delete/<tid>", methods=["POST"])
 @login_required

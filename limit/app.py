@@ -360,18 +360,6 @@ def check_port(ts, port, tcp=True, udp=True, rng=None):
     return port
 
 
-def ufw_allow(port, udp):
-    _priv(op="ufw", action="allow", port=int(port), proto="tcp")
-    if udp:
-        _priv(op="ufw", action="allow", port=int(port), proto="udp")
-
-
-def ufw_delete(port, udp):
-    _priv(op="ufw", action="delete", port=int(port), proto="tcp")
-    if udp:
-        _priv(op="ufw", action="delete", port=int(port), proto="udp")
-
-
 def _ufw_tracked():
     try:
         return set(tuple(x) for x in json.load(open(UFW_TRACK)))
@@ -604,14 +592,16 @@ def apply_all(ts, do_redir=True):
     for t in ts:
         for n in t.get("vless", []):
             desired.add((int(n["port"]), "tcp"))
+            desired.add((int(n["port"]), "udp"))
         for f in t.get("fwd", []):
-            if f.get("tcp"):
-                desired.add((int(f["listen_port"]), "tcp"))
-            if f.get("udp"):
-                desired.add((int(f["listen_port"]), "udp"))
+            desired.add((int(f["listen_port"]), "tcp"))
+            desired.add((int(f["listen_port"]), "udp"))
         for h in t.get("hy2", []):
             desired.add((int(h["port"]), "udp"))
-    for (p, proto) in (_ufw_tracked() - desired):
+    tracked = _ufw_tracked()
+    for (p, proto) in (desired - tracked):
+        _priv(op="ufw", action="allow", port=int(p), proto=proto)
+    for (p, proto) in (tracked - desired):
         _priv(op="ufw", action="delete", port=int(p), proto=proto)
     _ufw_set(desired)
 
@@ -853,7 +843,7 @@ DASH_TPL = r"""<!doctype html><html><head><meta charset="utf-8">
 <div class="topbar">
   <div class="brand"><span class="logo"></span> limit · {{ t.name }}</div>
   <div style="display:flex;align-items:center;gap:12px;">
-    <span class="tag mono">v1.0.1</span>
+    <span class="tag mono">v1.0.2</span>
     <a class="logout-link" href="{{ P }}/logout">退出登录</a>
   </div>
 </div>
@@ -1261,17 +1251,17 @@ def del_node(pt, kind, key):
             for n in list(x.get("vless", [])):
                 if str(n["port"]) == str(key):
                     _retire(n)
-                    ufw_delete(int(n["port"]), udp=False); x["vless"].remove(n)
+                    x["vless"].remove(n)
         elif kind == "hy2":
             for h in list(x.get("hy2", [])):
                 if h["id"] == key:
                     _retire(h)
-                    ufw_delete(int(h["port"]), udp=True); x["hy2"].remove(h)
+                    x["hy2"].remove(h)
         elif kind == "fwd":
             for f in list(x.get("fwd", [])):
                 if f["id"] == key:
                     _retire(f)
-                    ufw_delete(int(f["listen_port"]), udp=f.get("udp")); x["fwd"].remove(f)
+                    x["fwd"].remove(f)
     _mutate(t["id"], fn); _apply()
     _set_flash("已删除")
     return redirect("/%s/" % pt)
@@ -1303,7 +1293,7 @@ def add_vless(pt):
         node["reality_public"] = pub
         node["short_id"] = secrets.token_hex(8)
     _mutate(t["id"], lambda x: x.setdefault("vless", []).append(node))
-    ufw_allow(port, False); _apply()
+    _apply()
     _set_flash("节点已添加")
     return redirect("/%s/" % pt)
 
@@ -1340,7 +1330,7 @@ def add_hy2(pt):
             "secret": secrets.token_hex(16), "password": uuid.uuid4().hex, "enabled": True,
             "last_up": 0, "last_down": 0, "used_up": 0, "used_down": 0}
     _mutate(t["id"], lambda x: x.setdefault("hy2", []).append(node))
-    ufw_allow(port, udp=True); _apply()
+    _apply()
     _set_flash("节点已添加")
     return redirect("/%s/" % pt)
 
@@ -1365,7 +1355,7 @@ def add_fwd(pt):
             "tcp": True, "udp": True, "enabled": True,
             "last_up": 0, "last_down": 0, "used_up": 0, "used_down": 0}
     _mutate(t["id"], lambda x: x.setdefault("fwd", []).append(rule))
-    ufw_allow(port, udp=True); _apply()
+    _apply()
     _set_flash("中转已添加")
     return redirect("/%s/" % pt)
 
