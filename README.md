@@ -47,17 +47,32 @@ Update in place (keeps your nodes, users, tenants, port, path and credentials) b
 hive
 ```
 
-To install a **specific release** instead of the latest, append its tag (or run `hive <tag>` once installed):
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/install.sh) <tag>
-```
-
 To remove:
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/install.sh) uninstall
 ```
+
+## Versions
+
+- **v1.0.3** — current: fix — the "adjust quota" dialog's Cancel button now closes it.
+- **v1.0.2** — firewall rules are per-protocol and auto-reconciled (VLESS → `tcp+udp`, Hysteria2 → `udp`, forwarding → `tcp+udp`, all IPv4+IPv6); the limit card gains an adjust-quota button; fixed the typeless "allow port (tcp+udp)" rule.
+- **v1.0.1** — clearer wording (VLESS carries TCP+UDP), dropped the unused WebSocket/gRPC/xhttp transports, per-protocol port checks, IPv4/IPv6 + shared-base-port docs.
+- **v1.0.0** — initial public release (previously labelled `v1.10`).
+
+Install a **specific version** by appending its tag:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/install.sh) v1.0.0
+```
+
+or, once installed:
+
+```bash
+hive v1.0.0
+```
+
+Without a version it installs/updates to the latest (`main`).
 
 ## Security notes
 
