@@ -55,7 +55,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/inst
 
 ## 版本
 
-- **v1.0.3** —— 当前版本：修复「调整配额」弹窗的「取消」按钮无法关闭。
+- **v1.0.4** —— 当前版本：中转规则改用随机 id（字母+数字），删了重建不再沿用旧流量统计；删除中转时清空对应计数。
+- **v1.0.3** —— 修复「调整配额」弹窗的「取消」按钮无法关闭。
 - **v1.0.2** —— 防火墙按协议自动对账（VLESS→`tcp+udp`、Hysteria2→`udp`、中转→`tcp+udp`，均 IPv4+IPv6）；limit 卡片新增「调整配额」；修复手动放行 tcp+udp 的无类型规则。
 - **v1.0.1** —— 表述更清晰（VLESS 承载 TCP+UDP）、移除未用的 WebSocket/gRPC/xhttp、端口按协议判定、补充 IPv4/IPv6 与共享 base 端口文档。
 - **v1.0.0** —— 首个公开版本（原 v1.10）。

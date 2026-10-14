@@ -705,7 +705,7 @@ PANEL_HTML = r"""
   <div class="brand"><span class="logo"></span> admin</div>
   <div style="display:flex;align-items:center;gap:12px;">
     <button type="button" class="theme-btn" id="themeBtn" onclick="toggleTheme()" title="切换日夜主题">☾</button>
-    <span class="tag mono" title="版本">v1.0.3</span>
+    <span class="tag mono" title="版本">v1.0.4</span>
     <a class="logout-link" href="javascript:void(0)" onclick="openPwModal()">修改密码</a>
     <a class="logout-link" href="{{ url_for('panel.logout') }}">退出登录</a>
   </div>
@@ -3701,7 +3701,7 @@ def fwd_add():
         if any((r.get("name") or "").strip() == name for r in load_fwd_rules()):
             raise RuntimeError("已有同名中转节点：%s" % name)
         rule = {
-            "id": "fwd-%d" % listen_port,
+            "id": "fwd-" + secrets.token_hex(4),
             "name": name,
             "listen_port": listen_port,
             "target_ip": target_ip,
@@ -3753,6 +3753,10 @@ def fwd_delete(rule_id):
         rules.remove(r)
         save_fwd_rules(rules)
         _ufw_reconcile()
+        try:
+            traffic_store.remove_entry("fwd:" + str(r.get("id")))
+        except Exception:
+            pass
         _apply_fwd_cfg("中转 %s 已删除" % r.get("name"))
         msg = "中转 %s 已删除" % r.get("name")
     except Exception as e:
