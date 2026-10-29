@@ -692,6 +692,36 @@ systemctl enable --now xray >/dev/null 2>&1 || true
 systemctl enable --now xray-viewer >/dev/null 2>&1 || true
 # restart so an updated unit (ExecStart etc.) actually takes effect on upgrade
 [ "$HY2_USERS" -gt 0 ] && systemctl restart hysteria-node@hy2-443 >/dev/null 2>&1 || true
+# Reconcile the forwarding (dokodemo) tunnels from fwd.json into the xray config
+# before restarting, so a restart never leaves the "fwd-*" inbounds missing.
+python3 - <<'PYEOF'
+import json, os, re
+cfg_path = '/usr/local/etc/xray/config.json'
+fwd_path = '/usr/local/etc/xray/fwd.json'
+with open(cfg_path) as f:
+    cfg = json.load(f)
+inbounds = cfg.setdefault('inbounds', [])
+keep = [ib for ib in inbounds if not (ib.get('protocol') == 'dokodemo-door' and str(ib.get('tag', '')).startswith('fwd-'))]
+fwd = json.load(open(fwd_path)) if os.path.exists(fwd_path) else []
+for r in fwd:
+    if not r.get('enabled'):
+        continue
+    lport, tip, tport = r.get('listen_port'), r.get('target_ip', ''), r.get('target_port')
+    if not (lport and tip and tport):
+        continue
+    for proto in ('tcp', 'udp'):
+        if (proto == 'tcp' and r.get('tcp')) or (proto == 'udp' and r.get('udp')):
+            keep.append({
+                'listen': '0.0.0.0',
+                'port': int(lport),
+                'protocol': 'dokodemo-door',
+                'settings': {'address': tip, 'port': int(tport), 'network': proto},
+                'tag': 'fwd-' + re.sub(r'[^A-Za-z0-9_.\-]', '-', str(r['id'])) + '-' + proto,
+            })
+cfg['inbounds'] = keep
+with open(cfg_path, 'w') as f:
+    json.dump(cfg, f)
+PYEOF
 systemctl restart xray >/dev/null 2>&1 || true
 systemctl restart xray-viewer >/dev/null 2>&1 || true
 
@@ -759,7 +789,7 @@ echo -e "  已保留原有节点/用户配置（UUID、密钥、节点端口均�
 echo ""
 fi
 
-echo -e "${GREEN}--- Web Panel (v1.0.6) ---${NC}"
+echo -e "${GREEN}--- Web Panel (v1.0.7) ---${NC}"
 echo -e "  URL:        ${YELLOW}https://${SERVER_IP}:${PANEL_PORT}${PANEL_PATH}/login${NC}"
 if [ "$FRESH" -eq 1 ]; then
     echo -e "  Username:   ${PANEL_USER}"

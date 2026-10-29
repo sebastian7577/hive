@@ -55,7 +55,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/inst
 
 ## Versions
 
-- **v1.0.6** — current: a Hysteria2 node with no users bound no longer crash-loops. The generated node config always carries a usable `auth.userpass` block (hysteria rejects an empty one outright), and an enabled node with nobody bound to it is left stopped instead of being restarted forever by systemd — bind a user to it and the panel starts it. Existing nodes are untouched.
+- **v1.0.7** — current: the deployer now syncs the forwarding (dokodemo) tunnels from `fwd.json` into the xray config before restarting, so a restart/update can no longer come up without the `fwd-*` inbounds bound (this is what made a post-restart relay tunnel fail to start).
+- **v1.0.6** — previous: a Hysteria2 node with no users bound no longer crash-loops. The generated node config always carries a usable `auth.userpass` block (hysteria rejects an empty one outright), and an enabled node with nobody bound to it is left stopped instead of being restarted forever by systemd — bind a user to it and the panel starts it. Existing nodes are untouched.
 - **v1.0.5** — the masquerade / REALITY / Hysteria2 SNI pool is now **50 vetted targets**, each verified to serve TLS 1.3 + HTTP/2 and none of them blocked in mainland China (the old list still contained google/apple/wikipedia/netflix-style entries); fixed **xray failing on first start** (`open /usr/local/etc/xray/config.json: permission denied`) by keeping `/usr/local/etc/xray` traversable for the unprivileged `nobody` user the service runs as. Existing installs keep their current SNI and keys — the pool only affects new installs and newly created nodes.
 - **v1.0.4** — forwarding rules get a random id (letters+digits) so their traffic counters no longer carry over across delete/re-add; deleting a forwarding rule now clears its counter.
 - **v1.0.3** — fix — the "adjust quota" dialog's Cancel button now closes it.
