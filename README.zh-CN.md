@@ -55,7 +55,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/inst
 
 ## 版本
 
-- **v1.0.5** —— 当前版本：伪装 / REALITY / Hysteria2 的 SNI 池换成 **50 个经过验证的目标**（每个实测支持 TLS 1.3 + HTTP/2，且都不被墙；旧列表里还留着 google/apple/wikipedia/netflix 这类不该用的）；修复 **xray 首次启动失败**（`open /usr/local/etc/xray/config.json: permission denied`）——把 `/usr/local/etc/xray` 目录对服务所运行的非特权用户 `nobody` 保持可进入。已装机器保留现有 SNI 与密钥，新池只作用于新装与新创建的节点。
+- **v1.0.6** —— 当前版本：没有任何用户绑定的 Hysteria2 节点不再无限重启。生成的节点配置始终带一个可用的 `auth.userpass`（空的 userpass 会被 hysteria 直接拒绝），而「已启用但无人绑定」的节点会被保持停止，而不是被 systemd 反复拉起——在面板里给它绑定用户即可自动启动。现有节点配置不受影响。
+- **v1.0.5** —— 伪装 / REALITY / Hysteria2 的 SNI 池换成 **50 个经过验证的目标**（每个实测支持 TLS 1.3 + HTTP/2，且都不被墙；旧列表里还留着 google/apple/wikipedia/netflix 这类不该用的）；修复 **xray 首次启动失败**（`open /usr/local/etc/xray/config.json: permission denied`）——把 `/usr/local/etc/xray` 目录对服务所运行的非特权用户 `nobody` 保持可进入。已装机器保留现有 SNI 与密钥，新池只作用于新装与新创建的节点。
 - **v1.0.4** —— 中转规则改用随机 id（字母+数字），删了重建不再沿用旧流量统计；删除中转时清空对应计数。
 - **v1.0.3** —— 修复「调整配额」弹窗的「取消」按钮无法关闭。
 - **v1.0.2** —— 防火墙按协议自动对账（VLESS→`tcp+udp`、Hysteria2→`udp`、中转→`tcp+udp`，均 IPv4+IPv6）；limit 卡片新增「调整配额」；修复手动放行 tcp+udp 的无类型规则。

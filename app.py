@@ -734,7 +734,7 @@ PANEL_HTML = r"""
   <div class="brand"><span class="logo"></span> admin</div>
   <div style="display:flex;align-items:center;gap:12px;">
     <button type="button" class="theme-btn" id="themeBtn" onclick="toggleTheme()" title="切换日夜主题">☾</button>
-    <span class="tag mono" title="版本">v1.0.5</span>
+    <span class="tag mono" title="版本">v1.0.6</span>
     <a class="logout-link" href="javascript:void(0)" onclick="openPwModal()">修改密码</a>
     <a class="logout-link" href="{{ url_for('panel.logout') }}">退出登录</a>
   </div>
@@ -2396,7 +2396,11 @@ def _reality_public_key(private_key):
     return ""
 
 def render_hy2_yaml(node):
-    """手写 YAML（不依赖 pyyaml）。auth 统一 userpass，可多用户。"""
+    """手写 YAML（不依赖 pyyaml）。auth 统一 userpass，可多用户。
+
+    只输出 name/password 都非空的用户：hysteria 对空的 userpass 条目（甚至整个
+    userpass 为空）会直接 FATAL 退出（invalid config: auth.userpass），并被
+    systemd 无限重启。调用方需保证 users 非空（见 apply_hy2_node）。"""
     lines = ["listen: :%d" % int(node["port"]), ""]
     lines.append("tls:")
     lines.append("  cert: %s" % node["cert"])
@@ -2405,8 +2409,20 @@ def render_hy2_yaml(node):
     lines.append("auth:")
     lines.append("  type: userpass")
     lines.append("  userpass:")
+    usable = []
     for u in node.get("users", []):
-        lines.append("    %s: %s" % (_yaml_quote(u.get("name", "")), _yaml_quote(u.get("password", ""))))
+        name = (u.get("name") or "").strip()
+        password = u.get("password") or ""
+        if name and password:
+            usable.append((name, password))
+    if not usable:
+        # hysteria refuses to start on an empty userpass and systemd (Restart=on-failure,
+        # StartLimitIntervalSec=0) would then restart it forever. Keep the file valid
+        # with a credential nobody holds; apply_hy2_node() leaves the service stopped
+        # while no real user is bound.
+        usable = [("_unused", secrets.token_hex(24))]
+    for name, password in usable:
+        lines.append("    %s: %s" % (_yaml_quote(name), _yaml_quote(password)))
     lines.append("")
     lines.append("masquerade:")
     lines.append("  type: proxy")
@@ -2447,12 +2463,27 @@ WantedBy=multi-user.target
 
 def apply_hy2_node(node):
     """按节点状态写 conf.d/<id>.yaml 并启动/停止对应 hysteria-node@<id>.service。
-    返回 (ok, err)。"""
+    返回 (ok, err)。
+
+    没有任何可用用户时 hysteria 无法启动（auth.userpass 为空会 FATAL 并被
+    systemd 无限重启），所以这种节点保持停止状态，等有用户绑定后再次调用本函数
+    即可自动拉起。"""
     try:
         os.makedirs(HY2_CONF_DIR, exist_ok=True)
         write_hy2_unit_if_missing()
         unit = HY2_UNIT_NAME.format(id=node["id"])
         conf = os.path.join(HY2_CONF_DIR, node["id"] + ".yaml")
+        usable = [u for u in (node.get("users") or [])
+                  if (u.get("name") or "").strip() and u.get("password")]
+        if node.get("enabled") and not usable:
+            # Nothing to authenticate: write a valid config anyway (so a later
+            # `systemctl start` cannot crash-loop) but keep the unit stopped.
+            with open(conf, "w") as f:
+                f.write(render_hy2_yaml(node))
+            os.chmod(conf, 0o644)
+            subprocess.run(["systemctl", "disable", "--now", unit],
+                           capture_output=True, timeout=20)
+            return True, None
         if node.get("enabled"):
             with open(conf, "w") as f:
                 f.write(render_hy2_yaml(node))

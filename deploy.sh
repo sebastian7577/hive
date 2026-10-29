@@ -368,6 +368,87 @@ trafficStats:
 HYEOF
 fi
 
+# Reconcile the Hysteria2 node config with hy2_nodes.json (the panel is the
+# source of truth) before starting the unit. Two failure modes this avoids:
+#   * an empty `auth.userpass:` block - hysteria refuses to start on it
+#     ("invalid config: auth.userpass: empty auth userpass") and
+#     Restart=on-failure + StartLimitIntervalSec=0 then restart it forever. That
+#     is what a node whose last user was unbound leaves behind.
+#   * a config that drifted away from hy2_nodes.json (e.g. users exist in the
+#     panel but the yaml still has none, or the node was deleted in the panel
+#     while its yaml survived).
+# Prints the number of real users of the hy2-443 node (0 = nothing to serve).
+HY2_USERS=$(python3 - <<'PYEOF'
+import json, os, secrets, sys
+
+NODES = '/usr/local/etc/xray/hy2_nodes.json'
+CONF = '/etc/hysteria/conf.d/hy2-443.yaml'
+
+def q(v):
+    return json.dumps(str(v), ensure_ascii=False)
+
+def yaml_user_count(path):
+    n, inside = 0, False
+    try:
+        for line in open(path, encoding='utf-8'):
+            if line.strip() == 'userpass:':
+                inside = True
+                continue
+            if inside:
+                if line.startswith('    ') and line.strip():
+                    n += 1
+                elif line.strip():
+                    inside = False
+    except Exception:
+        return -1
+    return n
+
+try:
+    nodes = json.load(open(NODES))
+except Exception:
+    nodes = []
+node = next((n for n in nodes if isinstance(n, dict) and n.get('id') == 'hy2-443'), None)
+if node is None:
+    print(0)
+    sys.exit(0)
+
+users = []
+for u in (node.get('users') or []):
+    name = (u.get('name') or '').strip()
+    password = u.get('password') or ''
+    if name and password:
+        users.append((name, password))
+
+need_write = True
+if not users and os.path.exists(CONF) and yaml_user_count(CONF) > 0:
+    # No real users: the file only needs to stay valid, so keep an existing
+    # placeholder instead of rewriting it on every update.
+    need_write = False
+
+if need_write:
+    stats = node.get('stats') or {}
+    lines = ['listen: :%d' % int(node.get('port') or 443), '', 'tls:',
+             '  cert: %s' % (node.get('cert') or '/etc/hysteria/server.crt'),
+             '  key: %s' % (node.get('key') or '/etc/hysteria/server.key'), '',
+             'auth:', '  type: userpass', '  userpass:']
+    for name, password in (users or [('_unused', secrets.token_hex(24))]):
+        lines.append('    %s: %s' % (q(name), q(password)))
+    lines += ['', 'masquerade:', '  type: proxy', '  proxy:',
+              '    url: %s' % q(node.get('masquerade') or 'https://www.microsoft.com'),
+              '    rewriteHost: true', '', 'trafficStats:',
+              '  listen: %s' % (stats.get('listen') or '127.0.0.1:9999'),
+              '  secret: %s' % q(stats.get('secret') or secrets.token_hex(16))]
+    os.makedirs(os.path.dirname(CONF), exist_ok=True)
+    tmp = CONF + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(lines) + '\n')
+    os.replace(tmp, CONF)
+    os.chmod(CONF, 0o640)
+
+print(len(users))
+PYEOF
+)
+
 chown -R root:hy2main /etc/hysteria
 chmod 750 /etc/hysteria /etc/hysteria/conf.d 2>/dev/null || true
 chmod 640 /etc/hysteria/server.key /etc/hysteria/server.crt /etc/hysteria/conf.d/*.yaml 2>/dev/null || true
@@ -600,16 +681,24 @@ echo -e "${YELLOW}[*] ufw: panel port ${PANEL_PORT}/tcp allowed (Anywhere); exis
 
 echo -e "${YELLOW}[*] Starting services...${NC}"
 systemctl daemon-reload
-systemctl enable --now hysteria-node@hy2-443 >/dev/null 2>&1 || true
+if [ "$HY2_USERS" -gt 0 ]; then
+    systemctl enable --now hysteria-node@hy2-443 >/dev/null 2>&1 || true
+else
+    # Nothing to authenticate: keep the unit stopped so it does not restart-loop.
+    systemctl disable --now hysteria-node@hy2-443 >/dev/null 2>&1 || true
+    echo -e "${YELLOW}[*] hy2-443 has no user bound (or is gone from the panel) - Hysteria2 left stopped; bind a user to it in the panel to start it${NC}"
+fi
 systemctl enable --now xray >/dev/null 2>&1 || true
 systemctl enable --now xray-viewer >/dev/null 2>&1 || true
 # restart so an updated unit (ExecStart etc.) actually takes effect on upgrade
-systemctl restart hysteria-node@hy2-443 >/dev/null 2>&1 || true
+[ "$HY2_USERS" -gt 0 ] && systemctl restart hysteria-node@hy2-443 >/dev/null 2>&1 || true
 systemctl restart xray >/dev/null 2>&1 || true
 systemctl restart xray-viewer >/dev/null 2>&1 || true
 
 for i in 1 2 3 4 5 6 7 8; do
-    if systemctl is-active --quiet xray && systemctl is-active --quiet xray-viewer && systemctl is-active --quiet hysteria-node@hy2-443; then break; fi
+    if systemctl is-active --quiet xray && systemctl is-active --quiet xray-viewer; then
+        { [ "$HY2_USERS" -eq 0 ] || systemctl is-active --quiet hysteria-node@hy2-443; } && break
+    fi
     sleep 1
 done
 
@@ -638,6 +727,9 @@ echo ""
 XRAY_STATUS=$(systemctl is-active xray || true)
 VIEWER_STATUS=$(systemctl is-active xray-viewer || true)
 HYSTERIA_STATUS=$(systemctl is-active hysteria-node@hy2-443 || true)
+if [ "$HY2_USERS" -eq 0 ]; then
+    HYSTERIA_STATUS="stopped (no users bound)"
+fi
 
 echo -e "  Xray:             ${XRAY_STATUS}"
 echo -e "  Xray Viewer:      ${VIEWER_STATUS}"
@@ -667,7 +759,7 @@ echo -e "  已保留原有节点/用户配置（UUID、密钥、节点端口均�
 echo ""
 fi
 
-echo -e "${GREEN}--- Web Panel (v1.0.5) ---${NC}"
+echo -e "${GREEN}--- Web Panel (v1.0.6) ---${NC}"
 echo -e "  URL:        ${YELLOW}https://${SERVER_IP}:${PANEL_PORT}${PANEL_PATH}/login${NC}"
 if [ "$FRESH" -eq 1 ]; then
     echo -e "  Username:   ${PANEL_USER}"
