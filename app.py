@@ -70,8 +70,37 @@ def _xray_json_opts():
         return 0o640, (0, gid)
     return 0o644, None
 
-SITES = ["www.amazon.com", "www.microsoft.com", "www.bing.com", "www.apple.com",
-         "www.cloudflare.com", "www.wikipedia.org", "www.samsung.com", "www.icloud.com"]
+# Masquerade / REALITY target pool (50 entries, v1.0.5).
+# Keep in sync with deploy.sh SITES and the REALITY_SITES JS array below.
+# Every entry answers TLS 1.3 + ALPN h2, belongs to a large and long-lived
+# global brand, and is NOT filtered from mainland China (the client sends this
+# SNI in the clear, so a blocked one would make the node unusable).
+# Deliberately excluded: Google- and Apple-owned domains (Xray warns that their
+# shared REALITY fingerprint is blocked faster) and CN-blocked domains.
+SITES = [
+    # big tech, cloud and enterprise software
+    "www.microsoft.com", "www.bing.com", "www.cloudflare.com", "www.adobe.com",
+    "www.oracle.com", "www.ibm.com", "www.cisco.com", "www.salesforce.com",
+    "www.sap.com", "www.atlassian.com", "www.jetbrains.com", "www.autodesk.com",
+    # hardware and consumer electronics
+    "www.intel.com", "www.nvidia.com", "www.amd.com", "www.samsung.com",
+    "www.sony.com", "www.lg.com", "www.lenovo.com", "www.dell.com", "www.hp.com",
+    # automotive
+    "www.tesla.com", "www.toyota.com", "www.honda.com", "www.bmw.com",
+    "www.mercedes-benz.com", "www.volkswagen.com",
+    # retail and consumer brands
+    "www.walmart.com", "www.target.com", "www.costco.com", "www.homedepot.com",
+    "www.bestbuy.com", "www.ikea.com", "www.nike.com", "www.adidas.com",
+    # travel
+    "www.booking.com", "www.airbnb.com", "www.expedia.com",
+    # industrial / healthcare
+    "www.siemens.com", "www.bosch.com", "www.philips.com",
+    # SaaS and developer tools
+    "www.zoom.us", "www.mongodb.com", "www.elastic.co", "www.gitlab.com",
+    "www.docker.com",
+    # payments, marketplaces and gaming
+    "www.paypal.com", "www.ebay.com", "www.stripe.com", "www.xbox.com",
+]
 
 def _rand_site():
     """Random masquerade/SNI for new nodes so every install/node doesn't share one target."""
@@ -705,7 +734,7 @@ PANEL_HTML = r"""
   <div class="brand"><span class="logo"></span> admin</div>
   <div style="display:flex;align-items:center;gap:12px;">
     <button type="button" class="theme-btn" id="themeBtn" onclick="toggleTheme()" title="切换日夜主题">☾</button>
-    <span class="tag mono" title="版本">v1.0.4</span>
+    <span class="tag mono" title="版本">v1.0.5</span>
     <a class="logout-link" href="javascript:void(0)" onclick="openPwModal()">修改密码</a>
     <a class="logout-link" href="{{ url_for('panel.logout') }}">退出登录</a>
   </div>
@@ -1336,7 +1365,9 @@ let HY2 = {{ hy2_json|safe }};
 let FWD = {{ fwd_json|safe }};
 const APIBASE = '{{ url_for("panel.index") }}';
 var svXrayWasRunning = Date.now();
-const REALITY_SITES = ["www.amazon.com","www.google.com","www.cloudflare.com","www.microsoft.com","www.apple.com","www.netflix.com","www.youtube.com","www.wikipedia.org","www.github.com","www.zoom.us","www.discord.com","www.linkedin.com","www.facebook.com","www.bing.com","www.office.com","www.shopify.com","www.salesforce.com","www.adobe.com","www.spotify.com","www.twitch.tv"];
+// Masquerade / REALITY target pool - keep in sync with SITES (app.py) and deploy.sh.
+// v1.0.5: 50 targets, all TLS1.3+h2 and reachable from mainland China.
+const REALITY_SITES = ["www.microsoft.com","www.bing.com","www.cloudflare.com","www.adobe.com","www.oracle.com","www.ibm.com","www.cisco.com","www.salesforce.com","www.sap.com","www.atlassian.com","www.jetbrains.com","www.autodesk.com","www.intel.com","www.nvidia.com","www.amd.com","www.samsung.com","www.sony.com","www.lg.com","www.lenovo.com","www.dell.com","www.hp.com","www.tesla.com","www.toyota.com","www.honda.com","www.bmw.com","www.mercedes-benz.com","www.volkswagen.com","www.walmart.com","www.target.com","www.costco.com","www.homedepot.com","www.bestbuy.com","www.ikea.com","www.nike.com","www.adidas.com","www.booking.com","www.airbnb.com","www.expedia.com","www.siemens.com","www.bosch.com","www.philips.com","www.zoom.us","www.mongodb.com","www.elastic.co","www.gitlab.com","www.docker.com","www.paypal.com","www.ebay.com","www.stripe.com","www.xbox.com"];
 const LINKED_SNI_ROW = 'vl-sni';
 function randomOpenPort(){
   const used = new Set([10085]);

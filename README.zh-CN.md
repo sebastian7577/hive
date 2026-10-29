@@ -55,7 +55,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/inst
 
 ## 版本
 
-- **v1.0.4** —— 当前版本：中转规则改用随机 id（字母+数字），删了重建不再沿用旧流量统计；删除中转时清空对应计数。
+- **v1.0.5** —— 当前版本：伪装 / REALITY / Hysteria2 的 SNI 池换成 **50 个经过验证的目标**（每个实测支持 TLS 1.3 + HTTP/2，且都不被墙；旧列表里还留着 google/apple/wikipedia/netflix 这类不该用的）；修复 **xray 首次启动失败**（`open /usr/local/etc/xray/config.json: permission denied`）——把 `/usr/local/etc/xray` 目录对服务所运行的非特权用户 `nobody` 保持可进入。已装机器保留现有 SNI 与密钥，新池只作用于新装与新创建的节点。
+- **v1.0.4** —— 中转规则改用随机 id（字母+数字），删了重建不再沿用旧流量统计；删除中转时清空对应计数。
 - **v1.0.3** —— 修复「调整配额」弹窗的「取消」按钮无法关闭。
 - **v1.0.2** —— 防火墙按协议自动对账（VLESS→`tcp+udp`、Hysteria2→`udp`、中转→`tcp+udp`，均 IPv4+IPv6）；limit 卡片新增「调整配额」；修复手动放行 tcp+udp 的无类型规则。
 - **v1.0.1** —— 表述更清晰（VLESS 承载 TCP+UDP）、移除未用的 WebSocket/gRPC/xhttp、端口按协议判定、补充 IPv4/IPv6 与共享 base 端口文档。
@@ -84,7 +85,7 @@ hive v1.0.0
 - **租户隔离**：每个租户跑在自己独立的 **Xray 进程**（`limit-xray@<租户>`）与独立的 Hysteria2 进程里，均在 systemd 沙箱中；租户 Web 进程非 root，只能通过 `limit-helper` 操作自己的单元/端口。
 - **敏感文件不再全局可读。** 主 Xray 配置（含 REALITY 私钥、UUID）为 `0640 root:xrayconf`、主 Hysteria2 证书为 `0640 root:hy2main`，租户用户读不到主节点密钥。
 - **root helper 只碰租户端口。** `limit-helper` 拒绝放行/重定向租户段（`21000–49999`）以外的端口（唯一例外是它自己的 base 端口，仅作重定向目标），即使租户面板被攻破也无法碰 `22`、`443` 或面板端口。
-- **伪装随机化。** REALITY 目标 / 证书 CN / Hysteria2 SNI 每次安装从一份常见站点列表里随机选取（可用 `HIVE_MASQ=…` 覆盖），避免所有部署同一特征。
+- **伪装随机化。** REALITY 目标 / 证书 CN / Hysteria2 SNI 每次安装从 **50 个经过验证的站点**里随机选取——每个都实测支持 TLS 1.3 + HTTP/2，且都不被墙，因此 SNI 不会成为链路短板（可用 `HIVE_MASQ=…` 覆盖），也避免所有部署同一特征。
 
 ## 架构
 

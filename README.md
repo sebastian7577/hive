@@ -55,7 +55,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/inst
 
 ## Versions
 
-- **v1.0.4** — current: forwarding rules get a random id (letters+digits) so their traffic counters no longer carry over across delete/re-add; deleting a forwarding rule now clears its counter.
+- **v1.0.5** — current: the masquerade / REALITY / Hysteria2 SNI pool is now **50 vetted targets**, each verified to serve TLS 1.3 + HTTP/2 and none of them blocked in mainland China (the old list still contained google/apple/wikipedia/netflix-style entries); fixed **xray failing on first start** (`open /usr/local/etc/xray/config.json: permission denied`) by keeping `/usr/local/etc/xray` traversable for the unprivileged `nobody` user the service runs as. Existing installs keep their current SNI and keys — the pool only affects new installs and newly created nodes.
+- **v1.0.4** — forwarding rules get a random id (letters+digits) so their traffic counters no longer carry over across delete/re-add; deleting a forwarding rule now clears its counter.
 - **v1.0.3** — fix — the "adjust quota" dialog's Cancel button now closes it.
 - **v1.0.2** — firewall rules are per-protocol and auto-reconciled (VLESS → `tcp+udp`, Hysteria2 → `udp`, forwarding → `tcp+udp`, all IPv4+IPv6); the limit card gains an adjust-quota button; fixed the typeless "allow port (tcp+udp)" rule.
 - **v1.0.1** — clearer wording (VLESS carries TCP+UDP), dropped the unused WebSocket/gRPC/xhttp transports, per-protocol port checks, IPv4/IPv6 + shared-base-port docs.
@@ -84,7 +85,7 @@ Without a version it installs/updates to the latest (`main`).
 - **Tenant isolation**: each tenant runs its own **Xray process** (`limit-xray@<tenant>`) and its own Hysteria2 processes in systemd sandboxes; the tenant web process is non-root and can only touch its own units/ports through `limit-helper`.
 - **Sensitive files are not world-readable.** The main Xray config (REALITY private key, UUIDs) is `0640 root:xrayconf` and the main Hysteria2 certs `0640 root:hy2main`, so the tenant user cannot read the main node's secrets.
 - **The root helper only touches tenant ports.** `limit-helper` refuses to open or redirect any port outside the tenant ranges (`21000–49999`) — the only exception is the panel's own base port, used purely as the redirect target — so it cannot touch `22`, `443` or the panel ports even if a tenant panel is compromised.
-- **Randomised masquerade.** The REALITY target / cert CN / Hysteria2 SNI is picked per install from a list of popular sites (override with `HIVE_MASQ=…`), so deployments don't all share one fingerprint.
+- **Randomised masquerade.** The REALITY target / cert CN / Hysteria2 SNI is picked per install from a pool of **50 vetted sites** — each one verified to serve TLS 1.3 + HTTP/2 and none of them filtered in mainland China, so the SNI never becomes the weak link (override with `HIVE_MASQ=…`). Every deployment picks its own, so they don't share one fingerprint.
 
 ## Architecture
 

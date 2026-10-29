@@ -34,7 +34,37 @@ gen_port() {
 
 # Masquerade / REALITY target: pick a random popular site per install so every
 # deployment doesn't share the same fingerprint. Override with HIVE_MASQ=example.com
-SITES=(www.amazon.com www.microsoft.com www.bing.com www.apple.com www.cloudflare.com www.wikipedia.org www.samsung.com www.icloud.com)
+#
+# Pool rules (v1.0.5, 50 entries) - every entry below was verified to answer
+# TLS 1.3 with ALPN h2 on :443, belongs to a large and long-lived global brand,
+# and is NOT filtered from mainland China (a blocked SNI would make the node
+# unusable, since the client sends it in the clear).
+# Deliberately excluded: Google- and Apple-owned domains (Xray itself warns that
+# their shared REALITY fingerprint gets blocked faster), and domains that are
+# blocked in CN (wikipedia / netflix / twitter / reddit / ...).
+SITES=(
+    # big tech, cloud and enterprise software
+    www.microsoft.com www.bing.com www.cloudflare.com www.adobe.com www.oracle.com
+    www.ibm.com www.cisco.com www.salesforce.com www.sap.com www.atlassian.com
+    www.jetbrains.com www.autodesk.com
+    # hardware and consumer electronics
+    www.intel.com www.nvidia.com www.amd.com www.samsung.com www.sony.com www.lg.com
+    www.lenovo.com www.dell.com www.hp.com
+    # automotive
+    www.tesla.com www.toyota.com www.honda.com www.bmw.com www.mercedes-benz.com
+    www.volkswagen.com
+    # retail and consumer brands
+    www.walmart.com www.target.com www.costco.com www.homedepot.com www.bestbuy.com
+    www.ikea.com www.nike.com www.adidas.com
+    # travel
+    www.booking.com www.airbnb.com www.expedia.com
+    # industrial / healthcare
+    www.siemens.com www.bosch.com www.philips.com
+    # SaaS and developer tools
+    www.zoom.us www.mongodb.com www.elastic.co www.gitlab.com www.docker.com
+    # payments, marketplaces and gaming
+    www.paypal.com www.ebay.com www.stripe.com www.xbox.com
+)
 MASQ="${HIVE_MASQ:-${SITES[$(gen_port 0 $(( ${#SITES[@]} - 1 )))]}}"
 
 echo -e "${GREEN}========================================${NC}"
@@ -192,6 +222,12 @@ HY2_STATS_SECRET=$(openssl rand -hex 16)
 
 mkdir -p /opt/xray-viewer
 mkdir -p /usr/local/etc/xray
+# The official Xray installer creates /usr/local/etc/xray as 0750 root:xray, but
+# xray runs as `nobody` (plus SupplementaryGroups=xrayconf) and cannot even
+# traverse a 0750 directory - it died on first start with:
+#   open /usr/local/etc/xray/config.json: permission denied
+# The directory only needs to be traversable; the json files stay 0640 root:xrayconf.
+chmod 755 /usr/local/etc/xray 2>/dev/null || true
 mkdir -p /etc/hysteria/conf.d
 
 if [ "$FRESH" -eq 1 ] || [ ! -f /usr/local/etc/xray/config.json ]; then
@@ -342,6 +378,9 @@ chmod 640 /etc/hysteria/server.key /etc/hysteria/server.crt /etc/hysteria/conf.d
 [ -f /usr/local/etc/xray/fwd.json ] || echo "[]" > /usr/local/etc/xray/fwd.json
 # xray runs as an unprivileged user; keep the config (Reality private key, UUIDs)
 # readable only by root and the xrayconf group that xray itself belongs to.
+# The containing directory must stay traversable for `nobody` (see the chmod 755
+# above) or every start fails with "permission denied".
+chmod 755 /usr/local/etc/xray 2>/dev/null || true
 chown root:xrayconf /usr/local/etc/xray/*.json 2>/dev/null || true
 chmod 640 /usr/local/etc/xray/*.json 2>/dev/null || true
 
@@ -628,7 +667,7 @@ echo -e "  已保留原有节点/用户配置（UUID、密钥、节点端口均�
 echo ""
 fi
 
-echo -e "${GREEN}--- Web Panel (v1.0.4) ---${NC}"
+echo -e "${GREEN}--- Web Panel (v1.0.5) ---${NC}"
 echo -e "  URL:        ${YELLOW}https://${SERVER_IP}:${PANEL_PORT}${PANEL_PATH}/login${NC}"
 if [ "$FRESH" -eq 1 ]; then
     echo -e "  Username:   ${PANEL_USER}"
