@@ -426,7 +426,7 @@ a { color: #2f6fed; text-decoration: none; }
 .logout-link { font-size: 13px; color: #8a929e; }
 .logout-link:hover { color: #2f6fed; }
 
-.wrap { max-width: 1080px; margin: 24px auto; padding: 0 20px 40px; }
+.wrap { max-width: 1320px; margin: 24px auto; padding: 0 20px 40px; }
 
 .panel {
   background: #fff; border-radius: 10px; border: 1px solid #eceff2;
@@ -469,6 +469,41 @@ a { color: #2f6fed; text-decoration: none; }
 }
 .btn-sm-reset:hover { background: #e2e6eb; }
 .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* ufw 备注列：紧凑的行内输入框，聚焦后右侧浮出 ✓ / × */
+.fw-src-cell { white-space: nowrap; }
+.fw-cmt-cell { padding: 8px 12px 8px 10px; }
+.fw-cmt-wrap { display: inline-flex; align-items: center; gap: 4px; width: 100%; max-width: 210px; }
+.fw-cmt-input {
+  flex: 1 1 auto; min-width: 0; height: 24px; padding: 0 6px;
+  font-size: 12px; line-height: 22px; box-sizing: border-box;
+  border: 1px solid transparent; border-radius: 4px; background: transparent;
+  color: #4a5361; font-family: inherit;
+}
+.fw-cmt-input::placeholder { color: #cbd1d8; }
+.fw-cmt-input:hover { border-color: #e4e8ec; background: #fafbfc; }
+.fw-cmt-input:focus {
+  outline: none; border-color: #2f6fed; background: #fff;
+  box-shadow: 0 0 0 2px rgba(47,111,237,0.12);
+}
+.fw-cmt-acts { display: none; gap: 3px; flex: none; }
+.fw-cmt-wrap.editing .fw-cmt-acts { display: inline-flex; }
+.fw-cmt-ok, .fw-cmt-cancel {
+  width: 18px; height: 18px; border-radius: 4px; border: 1px solid #dde2e8;
+  background: #fff; cursor: pointer; font-size: 11px; line-height: 1; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: inherit;
+}
+.fw-cmt-ok { color: #1a9d55; border-color: #c8ecd6; background: #e8f7ee; }
+.fw-cmt-ok:hover { background: #d3f0de; }
+.fw-cmt-cancel { color: #d9414a; border-color: #f7cfd2; background: #fdecec; }
+.fw-cmt-cancel:hover { background: #fbdadb; }
+.fw-cmt-na { color: #c2c8cf; font-size: 12px; }
+html.dark .fw-cmt-input { color: #c9d1db; }
+html.dark .fw-cmt-input:hover { background: #1f242b; border-color: #2a2f37; }
+html.dark .fw-cmt-input:focus { background: #111417; border-color: #2f6fed; }
+html.dark .fw-cmt-ok { background: #1e3328; color: #5fd08c; border-color: #2c4a39; }
+html.dark .fw-cmt-cancel { background: #382126; color: #ef7d84; border-color: #503036; }
 
 table { width: 100%; border-collapse: collapse; }
 th {
@@ -1765,6 +1800,75 @@ function ackAllowlist(){
     .catch(function(){ if(b){ b.style.display='none'; } });
 }
 var FW = { ip: '', port: 0, off: false };
+function fwEsc(s){
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+// 备注就地编辑：聚焦后浮出 ✓ / ×，Enter=保存，Esc=取消
+document.addEventListener('mousedown', function(e){
+  var b = e.target.closest && e.target.closest('.fw-cmt-ok, .fw-cmt-cancel');
+  if (b) e.preventDefault();
+});
+document.addEventListener('focusin', function(e){
+  var inp = e.target;
+  if (!inp.classList || !inp.classList.contains('fw-cmt-input')) return;
+  inp.dataset.orig = inp.value;
+  inp.closest('.fw-cmt-wrap').classList.add('editing');
+});
+document.addEventListener('focusout', function(e){
+  var inp = e.target;
+  if (!inp.classList || !inp.classList.contains('fw-cmt-input')) return;
+  setTimeout(function(){
+    var wrap = inp.closest('.fw-cmt-wrap');
+    if (!wrap || !wrap.classList.contains('editing')) return;
+    if (wrap.contains(document.activeElement)) return;
+    wrap.classList.remove('editing');
+    inp.value = inp.dataset.orig || '';
+  }, 130);
+});
+document.addEventListener('click', function(e){
+  var ok = e.target.closest && e.target.closest('.fw-cmt-ok');
+  var cancel = e.target.closest && e.target.closest('.fw-cmt-cancel');
+  if (!ok && !cancel) return;
+  var wrap = (ok || cancel).closest('.fw-cmt-wrap');
+  if (!wrap) return;
+  var inp = wrap.querySelector('.fw-cmt-input');
+  if (!inp) return;
+  if (cancel) {
+    inp.value = inp.dataset.orig || '';
+    wrap.classList.remove('editing');
+    return;
+  }
+  var val = inp.value.trim(), orig = (inp.dataset.orig || '').trim();
+  if (val === orig) { wrap.classList.remove('editing'); return; }
+  var fd = new FormData();
+  fd.append('num', inp.dataset.num);
+  fd.append('comment', val);
+  fetch(APIBASE + 'firewall/comment', { method: 'POST', credentials: 'same-origin', body: fd })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d && d.ok) {
+        showToast((d.msg || '备注已更新'), false);
+        wrap.classList.remove('editing');
+        loadFirewall();
+      } else { showToastErr((d && d.msg) || '修改备注失败'); }
+    })
+    .catch(function(){ showToastErr('连接失败，请重试'); });
+});
+document.addEventListener('keydown', function(e){
+  var inp = e.target;
+  if (!inp.classList || !inp.classList.contains('fw-cmt-input')) return;
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    var w = inp.closest('.fw-cmt-wrap');
+    if (w) { var b = w.querySelector('.fw-cmt-ok'); if (b) b.click(); }
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    var w2 = inp.closest('.fw-cmt-wrap');
+    if (w2) { var b2 = w2.querySelector('.fw-cmt-cancel'); if (b2) b2.click(); }
+  }
+});
 async function loadFirewall(){
   const box = $('fw-body');
   try {
@@ -1780,11 +1884,32 @@ async function loadFirewall(){
       '</div>';
     if (!rules.length) { html += '<div class="empty-state">暂无 ufw 规则</div>'; }
     else {
-      html += '<table><tr><th>#</th><th>端口/协议</th><th>动作</th><th>来源</th><th>操作</th></tr>';
+      html += '<table class="fw-table"><tr>' +
+        '<th style="width:52px;">#</th>' +
+        '<th style="width:150px;">端口/协议</th>' +
+        '<th style="width:92px;">动作</th>' +
+        '<th style="width:330px;">来源</th>' +
+        '<th style="width:190px;">备注</th>' +
+        '<th style="width:76px;">操作</th>' +
+        '</tr>';
       rules.forEach(function(r){
         var mine = FW.ip && r.from && r.from.indexOf(FW.ip) !== -1;
-        html += '<tr><td>' + r.num + '</td><td class="mono">' + r.to + '</td><td>' + r.action + (r.action === 'ALLOW' ? ' IN' : '') + '</td>' +
-          '<td class="mono">' + r.from + (mine ? ' <span class="tag-hy2">当前IP</span>' : '') + '</td>' +
+        var to = fwEsc(r.to), from = fwEsc(r.from);
+        var v6 = to.indexOf('(v6)') !== -1;
+        var cmt = r.comment || '';
+        var cmtCell = v6
+          ? '<span class="fw-cmt-na" title="v6 镜像规则跟随 v4 规则，修改请编辑对应的 v4 行">' + (cmt ? fwEsc(cmt) : '&mdash;') + '</span>'
+          : '<span class="fw-cmt-wrap">' +
+              '<input type="text" class="fw-cmt-input" data-num="' + r.num + '" maxlength="60" ' +
+              'value="' + fwEsc(cmt) + '" data-orig="' + fwEsc(cmt) + '" placeholder="点击添加备注" autocomplete="off">' +
+              '<span class="fw-cmt-acts">' +
+                '<button type="button" class="fw-cmt-ok" title="保存备注">&#10003;</button>' +
+                '<button type="button" class="fw-cmt-cancel" title="取消">&#215;</button>' +
+              '</span>' +
+            '</span>';
+        html += '<tr><td>' + r.num + '</td><td class="mono">' + to + '</td><td>' + r.action + (r.action === 'ALLOW' ? ' IN' : '') + '</td>' +
+          '<td class="mono fw-src-cell">' + from + (mine ? ' <span class="tag-hy2">当前IP</span>' : '') + '</td>' +
+          '<td class="fw-cmt-cell">' + cmtCell + '</td>' +
           '<td><button type="button" class="btn-sm-danger" onclick="fwDelete(' + r.num + ')">删除</button></td></tr>';
       });
       html += '</table>';
@@ -2652,9 +2777,14 @@ def _ufw_rules_list():
         m = re.match(r"^\s*\[\s*(\d+)\]\s+(.+?)\s+(\S+)\s+(IN|OUT)\s+(.+?)\s*$", line)
         if not m:
             continue
-        num, to, action, direction, src = m.group(1), m.group(2).strip(), m.group(3), m.group(4), m.group(5).strip()
+        num, to, action, direction = m.group(1), m.group(2).strip(), m.group(3), m.group(4)
+        src, comment = m.group(5).strip(), ""
+        # ufw 把备注追加在来源后面（"1.2.3.4   # wg76 3T"），这里拆成独立字段
+        mc = re.match(r"^(.*?)\s+#\s*(.*)$", src)
+        if mc:
+            src, comment = mc.group(1).strip(), mc.group(2).strip()
         rules.append({"num": int(num), "to": to, "action": action,
-                      "direction": direction, "from": src})
+                      "direction": direction, "from": src, "comment": comment})
     return rules
 
 def _ufw_run(args):
@@ -3893,6 +4023,61 @@ def firewall_delete():
                 "如确需删除，请先「放行当前 IP 到面板端口」。" % (num, current_ip, panel_port))
         _ufw_run(["--force", "delete", str(num)])
         return jsonify({"ok": True, "msg": "已删除规则 #%d" % num})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)})
+
+@panel.route("/firewall/comment", methods=["POST"])
+@login_required
+def firewall_comment():
+    """修改规则备注。ufw 对「端口/协议/来源」相同的规则执行 "Rule updated"，
+    会原地替换 comment（v4/v6 一起），因此不会出现端口空窗，也不需要删旧规则。"""
+    try:
+        num = (request.form.get("num") or "").strip()
+        comment = (request.form.get("comment") or "").strip()
+        if not num.isdigit():
+            raise RuntimeError("缺少规则编号")
+        num = int(num)
+        # 备注限制：单行、去引号、长度上限（ufw 的 comment 不能含换行）
+        comment = re.sub(r"[\r\n\t\"']", "", comment)[:60].strip()
+        rules = _ufw_rules_list()
+        if rules is None:
+            raise RuntimeError("未检测到 ufw")
+        target = next((r for r in rules if r.get("num") == num), None)
+        if target is None:
+            raise RuntimeError("未找到编号 %d 的规则" % num)
+        if (target.get("action") or "").upper() != "ALLOW" or target.get("direction") != "IN":
+            raise RuntimeError("只能给入站 ALLOW 规则添加备注")
+        to = target.get("to") or ""
+        src = target.get("from") or ""
+        if "(v6)" in to:
+            raise RuntimeError("v6 镜像规则不支持备注，请修改对应的 v4 规则")
+        parts = to.split("/")
+        port = parts[0].strip()
+        proto = parts[1].strip() if len(parts) > 1 else ""
+        if not port.isdigit():
+            raise RuntimeError("该规则不是端口规则，暂不支持备注")
+        if comment == (target.get("comment") or ""):
+            return jsonify({"ok": True, "msg": "备注未变化"})
+
+        args = ["allow"]
+        if src in ("", "Anywhere", "Anywhere (v6)"):
+            args.append(port + ("/" + proto if proto else ""))
+        else:
+            args += ["from", src, "to", "any", "port", port]
+            if proto:
+                args += ["proto", proto]
+        if comment:
+            args += ["comment", comment]
+        _ufw_run(args)
+
+        # 校验备注确实写进去了（重复规则较多时 ufw 可能只更新其中一条）
+        check = _ufw_rules_list() or []
+        now = next((r for r in check
+                    if r.get("to") == to and (r.get("from") or "") == src
+                    and (r.get("action") or "").upper() == "ALLOW"), None)
+        if now is None or (now.get("comment") or "") != comment:
+            raise RuntimeError("备注未能写入（该规则可能存在重复项）")
+        return jsonify({"ok": True, "msg": "备注已更新"})
     except Exception as e:
         return jsonify({"ok": False, "msg": str(e)})
 
