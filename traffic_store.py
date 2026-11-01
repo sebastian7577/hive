@@ -109,9 +109,12 @@ def get_hy2_traffic_map():
                 data = json.loads(resp.read())
             for name, v in data.items():
                 if isinstance(v, dict) and isinstance(name, str):
-                    result.setdefault(name, {"up": 0, "down": 0})
-                    result[name]["up"] += int(v.get("tx", 0))
-                    result[name]["down"] += int(v.get("rx", 0))
+                    # 与 xray 的用户统计分开存放：同名用户曾互相覆盖，
+                    # 导致 xray (vless) 的流量被 hy2 的小计数盖掉。
+                    key = name if name.endswith("_hy2") else name + "_hy2"
+                    result.setdefault(key, {"up": 0, "down": 0})
+                    result[key]["up"] += int(v.get("tx", 0))
+                    result[key]["down"] += int(v.get("rx", 0))
         except Exception:
             pass
     return result
