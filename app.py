@@ -2222,6 +2222,14 @@ def human_bytes(n):
         n /= 1024
     return f"{n:.1f}PB"
 
+def _usage_of(traffic, name):
+    """用户的用量 = vless 计数(name) + hy2 计数(name_hy2)。
+    用户可能只有 vless、只有 hy2、或两者都有，有什么就算什么。"""
+    a = traffic.get(name) or {}
+    b = traffic.get(name + "_hy2") or {}
+    return {"up": int(a.get("up", 0)) + int(b.get("up", 0)),
+            "down": int(a.get("down", 0)) + int(b.get("down", 0))}
+
 def load_disabled():
     if not os.path.exists(DISABLED_PATH):
         return []
@@ -3390,12 +3398,7 @@ def user_reset_traffic(name):
         if rec is None:
             raise RuntimeError("未找到用户 %s" % name)
         traffic_store.reset_entry(name)
-        hname = rec.get("hy2_name")
-        if hname:
-            # hy2 统计存放在 <name>_hy2，同名用户也必须一起清零
-            hkey = hname if hname.endswith("_hy2") else hname + "_hy2"
-            if hkey != name:
-                traffic_store.reset_entry(hkey)
+        traffic_store.reset_entry(name + "_hy2")
         msg = "用户 <span class='mono'>%s</span> 的流量统计已清零" % name
     except Exception as e:
         msg = "重置失败：%s" % e
@@ -3414,11 +3417,7 @@ def user_delete(name):
         users.remove(rec)
         ok, err = _apply_user_change(users)
         traffic_store.remove_entry(name)
-        hname = rec.get("hy2_name")
-        if hname:
-            hkey = hname if hname.endswith("_hy2") else hname + "_hy2"
-            if hkey != name:
-                traffic_store.remove_entry(hkey)
+        traffic_store.remove_entry(name + "_hy2")
         if err:
             return _panel_state("已删除用户，但 %s" % err, False)
         msg = "用户 <span class='mono'>%s</span> 已从全部节点删除" % name
@@ -4262,15 +4261,7 @@ def _render_panel(flash_msg, flash_type):
         clients = []
         for u in users_recs:
             uname = u.get("name")
-            t = traffic.get(uname, {"up": 0, "down": 0})
-            hname_extra = u.get("hy2_name")
-            if hname_extra:
-                # hy2 的计数单独存在 <name>_hy2 下，这里总是尝试合并，
-                # 不再要求 hy2 名与 vless 名不同（同名用户以前会被漏掉）。
-                hkey = hname_extra if hname_extra.endswith("_hy2") else hname_extra + "_hy2"
-                if hkey != uname:
-                    t2 = traffic.get(hkey, {"up": 0, "down": 0})
-                    t = {"up": t["up"] + t2["up"], "down": t["down"] + t2["down"]}
+            t = _usage_of(traffic, uname)
             row = {
                 "type": "user", "id": uname, "label": uname,
                 "up": human_bytes(t["up"]), "down": human_bytes(t["down"]),
