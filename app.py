@@ -769,7 +769,7 @@ PANEL_HTML = r"""
   <div class="brand"><span class="logo"></span> admin</div>
   <div style="display:flex;align-items:center;gap:12px;">
     <button type="button" class="theme-btn" id="themeBtn" onclick="toggleTheme()" title="切换日夜主题">☾</button>
-    <span class="tag mono" title="版本">v1.0.8</span>
+    <span class="tag mono" title="版本">v1.0.9</span>
     <a class="logout-link" href="javascript:void(0)" onclick="openPwModal()">修改密码</a>
     <a class="logout-link" href="{{ url_for('panel.logout') }}">退出登录</a>
   </div>
@@ -3391,8 +3391,11 @@ def user_reset_traffic(name):
             raise RuntimeError("未找到用户 %s" % name)
         traffic_store.reset_entry(name)
         hname = rec.get("hy2_name")
-        if hname and hname != name:
-            traffic_store.reset_entry(hname)
+        if hname:
+            # hy2 统计存放在 <name>_hy2，同名用户也必须一起清零
+            hkey = hname if hname.endswith("_hy2") else hname + "_hy2"
+            if hkey != name:
+                traffic_store.reset_entry(hkey)
         msg = "用户 <span class='mono'>%s</span> 的流量统计已清零" % name
     except Exception as e:
         msg = "重置失败：%s" % e
@@ -3412,8 +3415,10 @@ def user_delete(name):
         ok, err = _apply_user_change(users)
         traffic_store.remove_entry(name)
         hname = rec.get("hy2_name")
-        if hname and hname != name:
-            traffic_store.remove_entry(hname)
+        if hname:
+            hkey = hname if hname.endswith("_hy2") else hname + "_hy2"
+            if hkey != name:
+                traffic_store.remove_entry(hkey)
         if err:
             return _panel_state("已删除用户，但 %s" % err, False)
         msg = "用户 <span class='mono'>%s</span> 已从全部节点删除" % name
@@ -4259,9 +4264,13 @@ def _render_panel(flash_msg, flash_type):
             uname = u.get("name")
             t = traffic.get(uname, {"up": 0, "down": 0})
             hname_extra = u.get("hy2_name")
-            if hname_extra and hname_extra != uname:
-                t2 = traffic.get(hname_extra, {"up": 0, "down": 0})
-                t = {"up": t["up"] + t2["up"], "down": t["down"] + t2["down"]}
+            if hname_extra:
+                # hy2 的计数单独存在 <name>_hy2 下，这里总是尝试合并，
+                # 不再要求 hy2 名与 vless 名不同（同名用户以前会被漏掉）。
+                hkey = hname_extra if hname_extra.endswith("_hy2") else hname_extra + "_hy2"
+                if hkey != uname:
+                    t2 = traffic.get(hkey, {"up": 0, "down": 0})
+                    t = {"up": t["up"] + t2["up"], "down": t["down"] + t2["down"]}
             row = {
                 "type": "user", "id": uname, "label": uname,
                 "up": human_bytes(t["up"]), "down": human_bytes(t["down"]),
