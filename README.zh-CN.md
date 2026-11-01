@@ -55,7 +55,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/sebastian7577/hive/main/inst
 
 ## 版本
 
-- **v1.0.8** — 当前版本：ufw 卡片新增独立的「备注」列（来源列不再显示行内的 `# comment`），备注可用 ✓ / × 就地编辑（Enter 保存、Esc 取消）。ufw 以 `Rule updated` 原地生效，规则编号不变、端口不中断。列宽重新分配（来源列按完整 IPv6 地址定宽、备注列 190px、操作列不换行），面板宽度从 1080px 调整为 1320px。
+- **v1.0.9** — 当前版本：修复用户流量统计丢失——当 VLESS 用户与 Hysteria2 用户同名时，两边的计数器会互相覆盖（`dict.update` 用 hy2 的小计数盖掉了 xray 的值），导致这些用户的总流量一直不增长。现在 Hysteria2 的计数单独存放在 `<用户名>_hy2`，用户列表会合并两个来源，清零/删除用户时也会一并处理 `_hy2` 条目。
+- **v1.0.8** —— ufw 卡片新增独立的「备注」列（来源列不再显示行内的 `# comment`），备注可用 ✓ / × 就地编辑（Enter 保存、Esc 取消）。ufw 以 `Rule updated` 原地生效，规则编号不变、端口不中断。列宽重新分配（来源列按完整 IPv6 地址定宽、备注列 190px、操作列不换行），面板宽度从 1080px 调整为 1320px。
 - **v1.0.7** —— 部署脚本在重启 xray 前会先把 `fwd.json` 里的转发（dokodemo）隧道同步进 xray 配置，因此重启/更新后隧道不会因为 inbound 没写而没拉起。
 - **v1.0.6** —— 上一版本：没有任何用户绑定的 Hysteria2 节点不再无限重启。生成的节点配置始终带一个可用的 `auth.userpass`（空的 userpass 会被 hysteria 直接拒绝），而「已启用但无人绑定」的节点会被保持停止，而不是被 systemd 反复拉起——在面板里给它绑定用户即可自动启动。现有节点配置不受影响。
 - **v1.0.5** —— 伪装 / REALITY / Hysteria2 的 SNI 池换成 **50 个经过验证的目标**（每个实测支持 TLS 1.3 + HTTP/2，且都不被墙；旧列表里还留着 google/apple/wikipedia/netflix 这类不该用的）；修复 **xray 首次启动失败**（`open /usr/local/etc/xray/config.json: permission denied`）——把 `/usr/local/etc/xray` 目录对服务所运行的非特权用户 `nobody` 保持可进入。已装机器保留现有 SNI 与密钥，新池只作用于新装与新创建的节点。
