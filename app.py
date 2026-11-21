@@ -769,7 +769,7 @@ PANEL_HTML = r"""
   <div class="brand"><span class="logo"></span> admin</div>
   <div style="display:flex;align-items:center;gap:12px;">
     <button type="button" class="theme-btn" id="themeBtn" onclick="toggleTheme()" title="切换日夜主题">☾</button>
-    <span class="tag mono" title="版本">v1.0.9</span>
+    <span class="tag mono" title="版本">v1.1.0</span>
     <a class="logout-link" href="javascript:void(0)" onclick="openPwModal()">修改密码</a>
     <a class="logout-link" href="{{ url_for('panel.logout') }}">退出登录</a>
   </div>
@@ -2964,127 +2964,54 @@ def inbound_is_protected(port):
 # the first caller claims a flag file and a worker restarts after a short
 # debounce, while later callers just refresh the flag. config.json is written
 # 0644 so the unprivileged xray process can read it.
-def write_config_and_restart(cfg):
-    stamp_fwd_inbounds(cfg)
-    _c, _o = _xray_json_opts()
-    atomic_write_json(CONFIG_PATH, cfg, chmod=_c, chown=_o)
+def _xray_restart_sync():
+    """重启 xray 并确认真的起来了（v1.1.0）。
 
-    schedule_xray_restart()
-    return True, None
-
-_RESTART_FLAG = "/usr/local/etc/xray/.xray-restart.flag"
-_RESTART_DEBOUNCE_SEC = 1.5
-_RESTART_TOUCH_INTERVAL = 0.25
-_restart_lock = threading.Lock()
-
-def _try_claim_restart():
-    """Atomically claim the restart flag. Returns True if this worker now
-    owns the pending restart, False if another worker already claimed it."""
-    try:
-        fd = os.open(_RESTART_FLAG, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        os.write(fd, str(os.getpid()).encode())
-        os.close(fd)
-        return True
-    except FileExistsError:
-        return False
-    except Exception:
-        return True
-
-def _touch_restart_flag():
-    """A mutation arrived while a claim already exists: bump the flag's
-    mtime to extend the owner's debounce window so this write is folded
-    into the same restart."""
-    try:
-        if os.path.exists(_RESTART_FLAG):
-            os.utime(_RESTART_FLAG, None)
-            return True
-    except Exception:
-        pass
-    return False
-
-def _release_restart():
-    try:
-        os.unlink(_RESTART_FLAG)
-    except Exception:
-        pass
-
-def _do_xray_restart():
+    旧实现用防抖 flag + 后台线程，一旦 flag 残留或 gunicorn 工作进程重启，
+    重启就不会发生，表现为“配置写进去了但没生效”。
+    现在改为同步执行并检查 is-active，调用方可直接获得真实结果。
+    """
     try:
         traffic_store.accumulate_once()
     except Exception:
         pass
     try:
-        subprocess.run(["systemctl", "restart", XRAY_SERVICE_NAME],
-                       capture_output=True, timeout=30)
+        subprocess.run(["rm", "-f", "/usr/local/etc/xray/.xray-restart.flag"],
+                       capture_output=True, timeout=5)
     except Exception:
         pass
-    _release_restart()
-
-def _deferred_restart_worker():
     try:
-        last_seen = time.time()
-        while True:
-            time.sleep(_RESTART_TOUCH_INTERVAL)
-            try:
-                mtime = os.path.getmtime(_RESTART_FLAG)
-            except FileNotFoundError:
-                return
-            except Exception:
-                mtime = last_seen
-            if mtime > last_seen:
-                last_seen = mtime
-            elif mtime + _RESTART_DEBOUNCE_SEC <= time.time():
-                break
-        try:
-            with open(_RESTART_FLAG) as f:
-                stamp = f.read().strip()
-        except Exception:
-            return
-        if stamp != str(os.getpid()):
-            return
-        _do_xray_restart()
-    except Exception:
-        pass
-    finally:
-        if os.path.exists(_RESTART_FLAG):
-            try:
-                with open(_RESTART_FLAG) as f:
-                    if f.read().strip() == str(os.getpid()):
-                        _release_restart()
-            except Exception:
-                pass
-
-def _read_flag_stamp():
+        r = subprocess.run(["systemctl", "restart", XRAY_SERVICE_NAME],
+                           capture_output=True, text=True, timeout=40)
+        if r.returncode != 0:
+            return False, (r.stderr or r.stdout or "").strip()[:300] or "systemctl restart 失败"
+    except Exception as e:
+        return False, str(e)
     try:
-        with open(_RESTART_FLAG) as f:
-            return f.read().strip()
+        st = subprocess.run(["systemctl", "is-active", XRAY_SERVICE_NAME],
+                            capture_output=True, text=True, timeout=10).stdout.strip()
     except Exception:
-        return None
+        st = ""
+    if st != "active":
+        return False, "xray 未处于 active（%s）" % (st or "unknown")
+    return True, None
+
+
+def restart_xray_now():
+    return _xray_restart_sync()
+
 
 def schedule_xray_restart():
-    with _restart_lock:
-        if _try_claim_restart():
-            t = threading.Thread(target=_deferred_restart_worker, daemon=True)
-            t.start()
-            return
-        stamp = _read_flag_stamp()
-        owner_alive = False
-        if stamp and stamp.isdigit():
-            try:
-                owner_alive = os.path.exists("/proc/%s" % stamp)
-            except Exception:
-                owner_alive = False
-        if not owner_alive:
-            try:
-                os.unlink(_RESTART_FLAG)
-                if _try_claim_restart():
-                    t = threading.Thread(target=_deferred_restart_worker, daemon=True)
-                    t.start()
-                    return
-            except Exception:
-                pass
-        else:
-            _touch_restart_flag()
+    # v1.1.0：保留函数名，内部改为同步重启，避免“配置写了但没重启”。
+    return _xray_restart_sync()
+
+
+def write_config_and_restart(cfg):
+    stamp_fwd_inbounds(cfg)
+    _c, _o = _xray_json_opts()
+    atomic_write_json(CONFIG_PATH, cfg, chmod=_c, chown=_o)
+    return _xray_restart_sync()
+
 
 def is_real_node(inbound):
     return inbound.get("protocol", "").lower() not in EXCLUDED_PROTOCOLS
@@ -4278,10 +4205,11 @@ def _render_panel(flash_msg, flash_type):
                     if ib is None:
                         continue
                     row["has_vless"] = True
+                    _vlabel = (ib.get("ui_remark") or "").strip() or ("vless%d" % _vless_rank.get(int(port), 0))
                     row["nodes"].append({
                         "kind": "vless", "key": port, "port": port,
-                        "label": "vless%d" % _vless_rank.get(int(port), 0),
-                        "title": ("vless%d" % _vless_rank.get(int(port), 0)) + (" · :%d" % port),
+                        "label": _vlabel,
+                        "title": _vlabel + (" · :%d" % port),
                         "protected": inbound_is_protected(port),
                     })
                 elif b.get("proto") == "hy2":
